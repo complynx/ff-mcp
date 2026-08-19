@@ -4,7 +4,10 @@ const assert = require("assert");
 const { TextEncoder } = require("util");
 
 globalThis.TextEncoder = TextEncoder;
-globalThis.crypto = { randomUUID: () => "document-token" };
+Object.defineProperty(globalThis, "crypto", {
+  configurable: true,
+  value: { randomUUID: () => "document-token" },
+});
 globalThis.location = { href: "https://example.test/" };
 globalThis.innerWidth = 1280;
 globalThis.innerHeight = 720;

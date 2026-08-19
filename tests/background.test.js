@@ -3,7 +3,10 @@
 const assert = require("assert");
 
 let nextId = 0;
-globalThis.crypto = { randomUUID: () => `test-id-${nextId += 1}` };
+Object.defineProperty(globalThis, "crypto", {
+  configurable: true,
+  value: { randomUUID: () => `test-id-${nextId += 1}` },
+});
 require("../extension/shared/policy.js");
 require("../extension/shared/rule-model.js");
 
