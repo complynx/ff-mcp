@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "ff-mcp",
+  "version": "0.1.0",
+  "description": "Capability-gated access to Firefox for local MCP clients.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ff-mcp@local",
+      "strict_min_version": "150.0"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "optional_permissions": [
+    "userScripts"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "shared/policy.js",
+      "shared/rule-model.js",
+      "background.js"
+    ],
+    "type": "classic"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "ff-mcp",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

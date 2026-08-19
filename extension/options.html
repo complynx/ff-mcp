@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ff-mcp settings</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="options">
+  <main>
+    <h1>ff-mcp settings</h1>
+    <p>Rules are evaluated inside Firefox. The built-in localhost rule grants READ only.</p>
+
+    <section class="panel">
+      <div class="split">
+        <div>
+          <h2>Persistent rules</h2>
+          <p class="muted">Build rules visually. No JSON or expression syntax is required.</p>
+        </div>
+        <button id="add-rule" type="button">Add website rule</button>
+      </div>
+      <div class="rule-help">
+        <p><strong>Allow group (OR):</strong> add the sites or URL patterns this rule may match.</p>
+        <p><strong>Exclusion group (NAND):</strong> add conditions that must not all match.</p>
+        <p class="muted">Empty AND/OR containers match nothing. Empty NAND/NOR containers match everything.</p>
+      </div>
+      <div id="rules"></div>
+      <div class="actions"><span id="save-result" role="status"></span><button id="save" type="button">Save rules</button></div>
+    </section>
+
+    <section class="panel">
+      <h2>Rule tester</h2>
+      <label>Rule <select id="test-rule"></select></label>
+      <label>URL <input id="test-url" value="https://github.com/example/project/pull/1"></label>
+      <div class="actions"><span id="test-result" role="status"></span><button id="test" type="button">Test URL</button></div>
+    </section>
+
+    <section class="panel">
+      <div class="split"><h2>Audit log</h2><button id="clear-audit" class="secondary" type="button">Clear</button></div>
+      <div id="audit"></div>
+    </section>
+  </main>
+  <script src="shared/policy.js"></script>
+  <script src="shared/rule-model.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

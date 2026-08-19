@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ff-mcp</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <header>
+    <div>
+      <h1>ff-mcp</h1>
+      <p id="status" class="muted">Server stopped</p>
+    </div>
+    <button id="toggle" type="button">Start</button>
+  </header>
+
+  <section id="connection" class="panel hidden">
+    <h2>Connection</h2>
+    <label>MCP URL <input id="server-url" readonly></label>
+    <label>Bearer token <input id="server-token" type="password" readonly></label>
+    <button id="copy" class="secondary" type="button">Copy connection JSON</button>
+  </section>
+
+  <section>
+    <h2>Access requests</h2>
+    <div id="pending"><p class="muted">No pending requests.</p></div>
+  </section>
+
+  <section>
+    <h2>Active grants</h2>
+    <div id="grants"><p class="muted">No temporary grants.</p></div>
+  </section>
+
+  <footer><button id="settings" class="link" type="button">Rules and audit log</button></footer>
+  <script src="popup.js"></script>
+</body>
+</html>
+

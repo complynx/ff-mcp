@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ff-mcp"
+version = "0.1.0"
+description = "A capability-gated MCP bridge for Firefox"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+license = { file = "LICENSE" }
+authors = [{ name = "ff-mcp contributors" }]
+dependencies = [
+  "mcp>=1.29,<2",
+  "uvicorn>=0.35,<1",
+]
+classifiers = [
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9,<10",
+  "pytest-asyncio>=1,<2",
+  "ruff>=0.16.3,<0.17",
+  "selenium>=4.32,<5",
+]
+
+[project.scripts]
+ff-mcp = "ff_mcp.__main__:main"
+ff-mcp-native = "ff_mcp.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ff_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+preview = true
+ignore = [
+  # The repository does not define per-file copyright ownership.
+  "missing-copyright-notice",
+  # Mutually exclusive docstring conventions; retain D211 and D212.
+  "incorrect-blank-line-before-class",
+  "multi-line-summary-second-line",
+  # Rules documented as incompatible with the Ruff formatter.
+  "missing-trailing-comma",
+  "prohibited-trailing-comma",
+  "docstring-tab-indentation",
+  "triple-single-quotes",
+  "indentation-with-invalid-multiple",
+  "indentation-with-invalid-multiple-comment",
+  "over-indented",
+  "multi-line-implicit-string-concatenation",
+  "bad-quotes-inline-string",
+  "bad-quotes-multiline-string",
+  "bad-quotes-docstring",
+  "avoidable-escaped-quote",
+  "unnecessary-escaped-quote",
+  "tab-indentation",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest rewrites plain assertions to provide rich failure diagnostics.
+"tests/**/*.py" = ["assert"]
+
+[tool.ruff.format]
+docstring-code-format = true

@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light dark;
+  font: menu;
+  --accent: AccentColor;
+  --accent-text: AccentColorText;
+  --border: color-mix(in srgb, currentColor 18%, transparent);
+  --panel: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  --warning: Mark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; color: CanvasText; background: Canvas; }
+.popup { width: 390px; padding: 16px; }
+.options main { width: min(900px, calc(100% - 32px)); margin: 32px auto; }
+header, .split { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { margin: 0; font-size: 1.4rem; }
+h2 { margin: 16px 0 8px; font-size: 1rem; }
+p { margin: 7px 0; }
+.muted { color: GrayText; }
+.hidden { display: none; }
+.panel, .card { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.panel { margin: 16px 0; }
+.card { margin: 8px 0; }
+.warning { border-color: var(--warning); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reason { padding: 7px; border-left: 3px solid var(--border); }
+label { display: grid; gap: 4px; margin: 8px 0; }
+input, textarea, select, button { font: inherit; }
+input, textarea, select { width: 100%; padding: 7px; color: FieldText; background: Field; border: 1px solid var(--border); border-radius: 5px; }
+textarea { font-family: ui-monospace, monospace; resize: vertical; }
+button { padding: 7px 11px; color: var(--accent-text); background: var(--accent); border: 1px solid transparent; border-radius: 5px; cursor: pointer; }
+button.secondary { color: ButtonText; background: ButtonFace; border-color: ButtonBorder; }
+button.link { color: LinkText; background: transparent; padding-left: 0; }
+button:disabled, input:disabled, select:disabled { color: GrayText; cursor: default; opacity: 1; }
+:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.actions select { width: auto; }
+footer { margin-top: 14px; }
+.audit-row { padding: 6px 0; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: .85rem; }
+.rule-help { margin: 12px 0; padding: 10px; border-inline-start: 3px solid var(--accent); background: color-mix(in srgb, AccentColor 8%, Canvas); }
+.rule-card { margin: 14px 0; }
+.rule-card-header, .group-header, .group-actions { display: flex; align-items: center; gap: 8px; }
+.rule-card-header .rule-name { flex: 1; font-weight: 600; }
+.builtin-rule { border-style: double; }
+.badge { padding: 3px 7px; color: SelectedItemText; background: SelectedItem; border-radius: 999px; font-size: .8rem; white-space: nowrap; }
+.inline-check { display: inline-flex; grid: none; align-items: center; gap: 2px; margin: 0; white-space: nowrap; }
+.inline-check input { width: auto; accent-color: AccentColor; }
+.compact { padding: 5px 8px; font-size: .85rem; }
+.capabilities { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
+.capabilities legend { padding: 0 5px; color: GrayText; font-size: .85rem; }
+.rule-group { margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-inline-start: 4px solid var(--accent); border-radius: 7px; background: Canvas; }
+.rule-group.negated { border-inline-start-color: var(--warning); }
+.rule-group .rule-group { margin-inline-start: 16px; }
+.group-header { justify-content: space-between; }
+.operator-select { width: auto; min-width: 180px; }
+.group-description, .empty-group { margin: 6px 0; color: GrayText; font-size: .85rem; }
+.empty-group { padding: 9px; border: 1px dashed var(--border); border-radius: 5px; text-align: center; }
+.predicate-row { display: grid; grid-template-columns: 150px 1fr auto; gap: 8px; margin: 8px 0; }
+.group-actions { justify-content: flex-start; margin-top: 8px; }
+
+@media (max-width: 650px) {
+  .rule-card-header, .group-header { align-items: stretch; flex-direction: column; }
+  .predicate-row { grid-template-columns: 1fr; }
+  .operator-select { width: 100%; }
+  .rule-group .rule-group { margin-inline-start: 6px; }
+}
+
+@media (forced-colors: active) {
+  :root { --border: CanvasText; }
+  .rule-help, .rule-group { background: Canvas; }
+  .badge { color: HighlightText; background: Highlight; }
+}
