@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.14
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.12.2"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked --group dev
+
+      - name: Check Python quality
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Test Python
+        run: uv run pytest -q
+
+      - name: Build Python distributions
+        run: uv build
+
+  extension:
+    name: Firefox extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install locked extension tooling
+        run: npm ci --ignore-scripts
+
+      - name: Test JavaScript
+        run: |
+          node tests/policy.test.js
+          node tests/rule-model.test.js
+          node tests/background.test.js
+          node tests/content.test.js
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check extension/background.js
+          node --check extension/content.js
+          node --check extension/options.js
+          node --check extension/popup.js
+          node --check extension/shared/policy.js
+          node --check extension/shared/rule-model.js
+
+      - name: Lint extension manifest
+        env:
+          NO_UPDATE_NOTIFIER: "1"
+        run: |
+          report="$RUNNER_TEMP/web-ext-lint.json"
+          ./node_modules/.bin/web-ext lint --source-dir extension --output json > "$report"
+          node scripts/check-web-ext-lint.js "$report"
+
+      - name: Build unsigned extension package
+        run: ./node_modules/.bin/web-ext build --source-dir extension --artifacts-dir web-ext-artifacts --overwrite-dest
+
+      - name: Upload unsigned extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-extension-unsigned
+          path: web-ext-artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 7

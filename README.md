@@ -29,6 +29,9 @@ revocable capabilities.
 - Python 3.14 (the package is pinned to the 3.14 minor line).
 - [`uv`](https://docs.astral.sh/uv/) is recommended for installation.
 
+One-off `SCRIPT` execution requires Firefox 153 or newer because that release introduced
+`userScripts.execute()`. The remaining capabilities support Firefox 150 onward.
+
 ## Install from a checkout
 
 Install the native companion as a persistent tool, then register it with Firefox:
@@ -106,6 +109,7 @@ node tests/content.test.js
 node --check extension/background.js
 node --check extension/content.js
 node --check extension/options.js
+node --check scripts/check-web-ext-lint.js
 ```
 
 Set `FIREFOX_BINARY` for installations Selenium cannot discover automatically. The integration test
@@ -113,10 +117,28 @@ recognizes the standard Linux Snap location without extra configuration.
 
 The Firefox extension has no runtime third-party dependencies or build step.
 
+## Releases
+
+Tags named `vX.Y.Z` run the release workflow. The tag version must match both
+`project.version` in `pyproject.toml` and `version` in `extension/manifest.json`. The workflow asks
+Mozilla Add-ons to sign the extension on the `unlisted` channel, verifies the returned XPI, and
+attaches the signed XPI plus its SHA-256 checksum to a GitHub release. The generated artifacts stay
+untracked.
+
+Configure these secrets in the repository's `release` environment before pushing a tag:
+
+- `AMO_JWT_ISSUER`: the issuer from an AMO API credential.
+- `AMO_JWT_SECRET`: the corresponding AMO API secret.
+
+Create the credentials from the [AMO API keys page](https://addons.mozilla.org/developers/addon/api/key/).
+Unlisted signing does not publish the extension in AMO search or listings.
+
 ## Security limits
 
 - The extension necessarily requests broad site access so it can mediate arbitrary tabs and use
   Firefox's background-tab screenshot API. Its internal capability checks are therefore critical.
+- Approved browser metadata, website content, and website activity are transmitted to the local
+  native host and MCP client. AMO declares these required data categories during installation.
 - Firefox-restricted pages such as `about:` and the add-ons store cannot be read by content scripts.
 - A tab-session grant intentionally survives navigation in that tab; document grants do not.
 - MCP client identity is descriptive within the one bearer-token trust domain. Use a separate config

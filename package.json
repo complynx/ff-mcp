@@ -1,0 +1,10 @@
+{
+  "name": "ff-mcp-tooling",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "web-ext": "10.6.0"
+  }
+}

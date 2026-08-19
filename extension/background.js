@@ -376,6 +376,9 @@ async function executeBridge(method, params, clientId) {
       if (!hasPermission || !browser.userScripts) {
         throw new Error("Enable Firefox's optional userScripts permission from a SCRIPT request in the ff-mcp popup");
       }
+      if (typeof browser.userScripts.execute !== "function") {
+        throw new Error("One-off SCRIPT execution requires Firefox 153 or newer");
+      }
       const code = String(params.code || "");
       if (!code || code.length > 200000) throw new Error("Script must contain 1 to 200000 characters");
       const world = params.world === "USER_SCRIPT" ? "USER_SCRIPT" : "MAIN";

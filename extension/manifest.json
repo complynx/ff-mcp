@@ -6,6 +6,13 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "ff-mcp@local",
+      "data_collection_permissions": {
+        "required": [
+          "browsingActivity",
+          "websiteActivity",
+          "websiteContent"
+        ]
+      },
       "strict_min_version": "150.0"
     }
   },

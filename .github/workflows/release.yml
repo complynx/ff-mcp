@@ -1,0 +1,117 @@
+name: Release signed Firefox extension
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Run CI
+    uses: ./.github/workflows/ci.yml
+
+  sign-and-release:
+    name: Sign and publish unlisted XPI
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install locked extension tooling
+        run: npm ci --ignore-scripts
+
+      - name: Verify tag and project versions
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          tag_version="${TAG_VERSION#v}"
+          project_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          extension_version="$(node -p 'require("./extension/manifest.json").version')"
+          test "$tag_version" = "$project_version"
+          test "$tag_version" = "$extension_version"
+
+      - name: Sign as an unlisted Firefox extension
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [[ -z "$AMO_JWT_ISSUER" || -z "$AMO_JWT_SECRET" ]]; then
+            echo "::error::Configure AMO_JWT_ISSUER and AMO_JWT_SECRET in the release environment"
+            exit 1
+          fi
+          ./node_modules/.bin/web-ext sign \
+            --source-dir extension \
+            --artifacts-dir web-ext-artifacts \
+            --channel unlisted \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET" \
+            --approval-timeout 900000
+
+      - name: Verify signed XPI
+        id: signed-xpi
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mapfile -t signed_xpis < <(find web-ext-artifacts -maxdepth 1 -type f -name '*.xpi' -print)
+          if [[ "${#signed_xpis[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one signed XPI, found ${#signed_xpis[@]}"
+            exit 1
+          fi
+          unzip -t "${signed_xpis[0]}"
+          signature_files="$RUNNER_TEMP/signed-xpi-files.txt"
+          unzip -Z1 "${signed_xpis[0]}" > "$signature_files"
+          grep -Fxq META-INF/manifest.mf "$signature_files"
+          grep -Fxq META-INF/mozilla.sf "$signature_files"
+          grep -Fxq META-INF/mozilla.rsa "$signature_files"
+          mkdir release
+          release_xpi="release/ff-mcp-${TAG_NAME}-firefox-signed.xpi"
+          cp "${signed_xpis[0]}" "$release_xpi"
+          sha256sum "$release_xpi" | tee "$release_xpi.sha256"
+          echo "path=$release_xpi" >> "$GITHUB_OUTPUT"
+          echo "checksum=$release_xpi.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          XPI_PATH: ${{ steps.signed-xpi.outputs.path }}
+          CHECKSUM_PATH: ${{ steps.signed-xpi.outputs.checksum }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" > /dev/null 2>&1; then
+            gh release upload "$TAG_NAME" \
+              "$XPI_PATH#Firefox signed unlisted XPI" \
+              "$CHECKSUM_PATH#SHA-256 checksum" \
+              --clobber
+          else
+            gh release create "$TAG_NAME" \
+              "$XPI_PATH#Firefox signed unlisted XPI" \
+              "$CHECKSUM_PATH#SHA-256 checksum" \
+              --verify-tag \
+              --generate-notes \
+              --title "$TAG_NAME"
+          fi

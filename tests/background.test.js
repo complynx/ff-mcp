@@ -352,6 +352,24 @@ async function bridgeRequest(id, method, params) {
   failRulePersistence = false;
   assert(!(await runtimeListener({ type: "ui.state" })).pending.some((request) => request.id === invalidatedRollback.result.requestId));
 
+  currentInfo = { documentToken: "compatibility-document", url: "https://new.example/compatibility", title: "Compatibility" };
+  const compatibilityGrant = await bridgeRequest("request-script-compatibility", "grants.request", {
+    tabId: 1,
+    capabilities: ["SCRIPT"],
+    lifetime: "document",
+  });
+  await runtimeListener({
+    type: "pending.approve",
+    requestId: compatibilityGrant.result.requestId,
+    lifetime: "document",
+  });
+  const executeUserScript = browser.userScripts.execute;
+  browser.userScripts.execute = undefined;
+  const unsupportedScript = await bridgeRequest("unsupported-script", "page.script", { tabId: 1, code: "1 + 1" });
+  assert.strictEqual(unsupportedScript.ok, false);
+  assert(/requires Firefox 153 or newer/.test(unsupportedScript.error.message));
+  browser.userScripts.execute = executeUserScript;
+
   currentInfo = { documentToken: "script-document", url: "https://new.example/reload", title: "Script" };
   const scriptGrant = await bridgeRequest("request-script", "grants.request", {
     tabId: 1,
