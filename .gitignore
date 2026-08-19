@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.ff-mcp.env
 dist/
 .ff-mcp-firefox-*/
 build/
