@@ -7,8 +7,6 @@ const PREDICATES = {
   regex: { label: "URL regex", placeholder: "^https://example\\.com/" },
   scheme: { label: "Scheme", placeholder: "https" },
 };
-const BUILTIN_RULE_ID = "builtin-localhost-read";
-
 const rulesElement = document.querySelector("#rules");
 const saveResult = document.querySelector("#save-result");
 const testResult = document.querySelector("#test-result");
@@ -31,17 +29,6 @@ function selectOption(value, text, selected) {
   return option;
 }
 
-function builtinRule() {
-  return {
-    id: BUILTIN_RULE_ID,
-    name: "Localhost read access",
-    enabled: true,
-    capabilities: ["READ"],
-    tree: FFMCPRuleModel.defaultTree(),
-    builtin: true,
-  };
-}
-
 function newRule() {
   return {
     id: crypto.randomUUID(),
@@ -49,7 +36,8 @@ function newRule() {
     enabled: true,
     capabilities: ["READ"],
     tree: FFMCPRuleModel.blankTree(),
-    builtin: false,
+    required: false,
+    collapsed: false,
   };
 }
 
@@ -60,18 +48,16 @@ function groupDescription(group) {
   return "OR: at least one condition below must match.";
 }
 
-function renderPredicate(predicate, remove, readOnly) {
+function renderPredicate(predicate, remove) {
   const row = node("div", undefined, "predicate-row");
   const kind = document.createElement("select");
   for (const [value, details] of Object.entries(PREDICATES)) {
     kind.append(selectOption(value, details.label, predicate.predicate === value));
   }
-  kind.disabled = readOnly;
   const input = document.createElement("input");
   input.type = "text";
   input.value = predicate.value;
   input.placeholder = PREDICATES[predicate.predicate].placeholder;
-  input.readOnly = readOnly;
   input.setAttribute("aria-label", "Condition value");
   kind.addEventListener("change", () => {
     predicate.predicate = kind.value;
@@ -79,24 +65,26 @@ function renderPredicate(predicate, remove, readOnly) {
   });
   input.addEventListener("input", () => { predicate.value = input.value; });
   row.append(kind, input);
-  if (!readOnly) {
-    const removeButton = node("button", "Remove", "secondary compact");
-    removeButton.type = "button";
-    removeButton.addEventListener("click", remove);
-    row.append(removeButton);
-  }
+  const removeButton = node("button", "Remove", "secondary compact");
+  removeButton.type = "button";
+  removeButton.addEventListener("click", remove);
+  row.append(removeButton);
   return row;
 }
 
-function renderGroup(group, remove, isRoot = false, readOnly = false) {
-  const container = node("div", undefined, `rule-group${group.negated ? " negated" : ""}`);
-  const header = node("div", undefined, "group-header");
-  if (isRoot) {
-    header.append(node("strong", "Main container · AND"));
-  } else if (readOnly) {
-    const name = group.negated ? `NOT ${group.operator.toUpperCase()}` : group.operator.toUpperCase();
-    header.append(node("strong", name));
-  } else {
+function renderGroup(group, remove, isRoot = false) {
+  const container = document.createElement("details");
+  container.className = `rule-group${group.negated ? " negated" : ""}`;
+  container.open = !group.collapsed;
+  container.addEventListener("toggle", () => { group.collapsed = !container.open; });
+  const label = isRoot
+    ? "Main container · AND"
+    : `${group.negated ? "NOT " : ""}${group.operator.toUpperCase()}`;
+  const summary = node("summary", label, "group-summary");
+  const body = node("div", undefined, "group-body");
+  container.append(summary);
+  if (!isRoot) {
+    const header = node("div", undefined, "group-header");
     const operator = document.createElement("select");
     operator.className = "operator-select";
     operator.append(
@@ -120,8 +108,9 @@ function renderGroup(group, remove, isRoot = false, readOnly = false) {
     removeButton.type = "button";
     removeButton.addEventListener("click", remove);
     header.append(operator, negated, removeButton);
+    body.append(header);
   }
-  container.append(header, node("p", isRoot ? "Every child container must allow the URL." : groupDescription(group), "group-description"));
+  body.append(node("p", isRoot ? "Every child container must allow the URL." : groupDescription(group), "group-description"));
 
   const children = node("div", undefined, "group-children");
   group.children.forEach((child, index) => {
@@ -129,55 +118,71 @@ function renderGroup(group, remove, isRoot = false, readOnly = false) {
       group.children.splice(index, 1);
       renderRules();
     };
-    children.append(child.type === "group" ? renderGroup(child, removeChild, false, readOnly) : renderPredicate(child, removeChild, readOnly));
+    children.append(child.type === "group" ? renderGroup(child, removeChild) : renderPredicate(child, removeChild));
   });
   if (!group.children.length) {
     children.append(node("p", group.negated ? "Empty: permits every URL." : "Empty: dismisses every URL.", "empty-group"));
   }
-  container.append(children);
+  body.append(children);
 
-  if (!readOnly) {
-    const actions = node("div", undefined, "group-actions");
-    const addCondition = node("button", "+ Condition", "secondary compact");
-    addCondition.type = "button";
-    addCondition.addEventListener("click", () => {
-      group.children.push(FFMCPRuleModel.predicate());
-      renderRules();
-    });
-    const addGroup = node("button", "+ Container", "secondary compact");
-    addGroup.type = "button";
-    addGroup.addEventListener("click", () => {
-      group.children.push(FFMCPRuleModel.group("or"));
-      renderRules();
-    });
-    actions.append(addCondition, addGroup);
-    container.append(actions);
-  }
+  const actions = node("div", undefined, "group-actions");
+  const addCondition = node("button", "+ Condition", "secondary compact");
+  addCondition.type = "button";
+  addCondition.addEventListener("click", () => {
+    group.children.push(FFMCPRuleModel.predicate());
+    renderRules();
+  });
+  const addGroup = node("button", "+ Container", "secondary compact");
+  addGroup.type = "button";
+  addGroup.addEventListener("click", () => {
+    group.children.push(FFMCPRuleModel.group("or"));
+    renderRules();
+  });
+  actions.append(addCondition, addGroup);
+  body.append(actions);
+  container.append(body);
   return container;
 }
 
 function renderRule(rule, index) {
-  const card = node("article", undefined, `card rule-card${rule.builtin ? " builtin-rule" : ""}`);
+  const card = document.createElement("details");
+  card.className = `card rule-card${rule.required ? " default-rule" : ""}`;
+  card.open = !rule.collapsed;
+  card.addEventListener("toggle", () => { rule.collapsed = !card.open; });
+  const summary = node("summary", undefined, "rule-summary");
+  const summaryName = node("strong", rule.name || "Unnamed rule");
+  const summaryMeta = node("span", undefined, "rule-summary-meta");
+  const updateSummary = () => {
+    const status = rule.enabled ? "Enabled" : "Disabled";
+    const capabilities = rule.capabilities.join(", ") || "No capabilities";
+    summaryMeta.textContent = `${rule.required ? "Default · " : ""}${status} · ${capabilities}`;
+  };
+  updateSummary();
+  summary.append(summaryName, summaryMeta);
+  card.append(summary);
+  const body = node("div", undefined, "rule-card-body");
   const header = node("div", undefined, "rule-card-header");
   const name = document.createElement("input");
   name.className = "rule-name";
   name.value = rule.name;
-  name.readOnly = rule.builtin;
   name.setAttribute("aria-label", "Rule name");
   name.addEventListener("input", () => {
     rule.name = name.value;
+    summaryName.textContent = name.value || "Unnamed rule";
     renderTester();
   });
   const enabled = node("label", undefined, "inline-check");
   const enabledInput = document.createElement("input");
   enabledInput.type = "checkbox";
   enabledInput.checked = rule.enabled;
-  enabledInput.disabled = rule.builtin;
-  enabledInput.addEventListener("change", () => { rule.enabled = enabledInput.checked; });
-  enabled.append(enabledInput, document.createTextNode(rule.builtin ? " Always enabled" : " Enabled"));
+  enabledInput.addEventListener("change", () => {
+    rule.enabled = enabledInput.checked;
+    updateSummary();
+  });
+  enabled.append(enabledInput, document.createTextNode(" Enabled"));
   header.append(name, enabled);
-  if (rule.builtin) {
-    header.append(node("span", "Built in", "badge"));
+  if (rule.required) {
+    header.append(node("span", "Default", "badge"));
   } else {
     const remove = node("button", "Delete rule", "secondary compact");
     remove.type = "button";
@@ -187,7 +192,7 @@ function renderRule(rule, index) {
     });
     header.append(remove);
   }
-  card.append(header);
+  body.append(header);
 
   const capabilities = document.createElement("fieldset");
   capabilities.className = "capabilities";
@@ -197,15 +202,16 @@ function renderRule(rule, index) {
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = rule.capabilities.includes(capability);
-    input.disabled = rule.builtin;
     input.addEventListener("change", () => {
       if (input.checked && !rule.capabilities.includes(capability)) rule.capabilities.push(capability);
       if (!input.checked) rule.capabilities = rule.capabilities.filter((value) => value !== capability);
+      updateSummary();
     });
     label.append(input, document.createTextNode(` ${capability}`));
     capabilities.append(label);
   }
-  card.append(capabilities, renderGroup(rule.tree, null, true, rule.builtin));
+  body.append(capabilities, renderGroup(rule.tree, null, true));
+  card.append(body);
   return card;
 }
 
@@ -234,17 +240,15 @@ function renderAudit(events) {
 
 function loadState(state) {
   rulesRevision = state.rulesRevision;
-  const storedRules = state.rules
-    .filter((rule) => rule.id !== BUILTIN_RULE_ID)
-    .map((rule) => ({
+  ruleModels = state.rules.map((rule) => ({
       id: rule.id || crypto.randomUUID(),
       name: String(rule.name || "Unnamed rule"),
       enabled: rule.enabled !== false,
       capabilities: Array.isArray(rule.capabilities) ? [...rule.capabilities] : ["READ"],
       tree: rule.visual ? FFMCPRuleModel.fromData(rule.visual) : FFMCPRuleModel.fromExpression(rule.expression),
-      builtin: false,
+      required: rule.id === FFMCPRuleModel.DEFAULT_RULE_ID,
+      collapsed: false,
     }));
-  ruleModels = [builtinRule(), ...storedRules];
   renderRules();
   renderAudit(state.audit);
 }
@@ -256,7 +260,7 @@ document.querySelector("#add-rule").addEventListener("click", () => {
 
 document.querySelector("#save").addEventListener("click", async () => {
   try {
-    const values = ruleModels.filter((rule) => !rule.builtin).map((rule) => {
+    const values = ruleModels.map((rule) => {
       if (!rule.capabilities.length) throw new Error(`${rule.name || "Rule"} needs at least one capability`);
       return {
         id: rule.id,

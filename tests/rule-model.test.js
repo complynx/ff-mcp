@@ -9,6 +9,10 @@ const model = globalThis.FFMCPRuleModel;
 const policy = globalThis.FFMCPPolicy;
 
 const defaults = model.defaultTree();
+const defaultRule = model.defaultRule();
+assert.strictEqual(defaultRule.id, model.DEFAULT_RULE_ID);
+assert.strictEqual(defaultRule.expression, model.toExpression(defaultRule.visual));
+assert.deepStrictEqual(defaultRule.capabilities, ["READ"]);
 assert.strictEqual(policy.matches(model.toExpression(defaults), "http://localhost:3000/"), true);
 assert.strictEqual(policy.matches(model.toExpression(defaults), "https://app.localhost/"), true);
 assert.strictEqual(policy.matches(model.toExpression(defaults), "http://127.20.30.40:8080/"), true);

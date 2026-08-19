@@ -3,6 +3,12 @@
   "name": "ff-mcp",
   "version": "0.1.0",
   "description": "Capability-gated access to Firefox for local MCP clients.",
+  "icons": {
+    "32": "icons/ff-mcp-32.png",
+    "48": "icons/ff-mcp-48.png",
+    "96": "icons/ff-mcp-96.png",
+    "128": "icons/ff-mcp-128.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "ff-mcp@local",
@@ -45,6 +51,11 @@
     }
   ],
   "action": {
+    "default_icon": {
+      "16": "icons/ff-mcp-16.png",
+      "32": "icons/ff-mcp-32.png",
+      "64": "icons/ff-mcp-64.png"
+    },
     "default_title": "ff-mcp",
     "default_popup": "popup.html"
   },

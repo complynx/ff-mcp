@@ -96,8 +96,8 @@ and `NOR` groups. Then select the capabilities that the rule grants.
 An empty positive group matches nothing. An empty negated group matches everything. Therefore, a
 new rule stays inactive until you add a condition to its allow group.
 
-The built-in localhost `READ` rule is always active. You cannot edit or remove it. A persistent
-approval is automatically added to the main allow group.
+The default localhost rule starts with `READ` access. You can edit or disable it, but you cannot
+delete it. A persistent approval is automatically added to the main allow group of a new rule.
 
 Regular expressions have a length limit. They cannot use backreferences, lookarounds, or clear
 nested quantifiers. This is a safety subset. It is not a complete RE2 implementation.

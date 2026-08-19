@@ -17,10 +17,15 @@ const approvalTabs = new Map();
 const invalidatedApprovals = new Set();
 let rulesQueue = Promise.resolve();
 
-const ready = browser.storage.local.get(["rules", "rulesRevision", "audit"]).then((stored) => {
+const ready = browser.storage.local.get(["rules", "rulesRevision", "audit"]).then(async (stored) => {
   state.rules = Array.isArray(stored.rules) ? stored.rules : [];
   state.rulesRevision = Number.isSafeInteger(stored.rulesRevision) && stored.rulesRevision >= 0 ? stored.rulesRevision : 0;
   state.audit = Array.isArray(stored.audit) ? stored.audit : [];
+  if (!state.rules.some((rule) => rule.id === FFMCPRuleModel.DEFAULT_RULE_ID)) {
+    state.rules = [FFMCPRuleModel.defaultRule(), ...state.rules];
+    state.rulesRevision += 1;
+    await browser.storage.local.set({ rules: state.rules, rulesRevision: state.rulesRevision });
+  }
 });
 
 function randomId() {
@@ -124,9 +129,6 @@ function validCapabilities(values) {
 }
 
 function matchingRule(url, capability) {
-  if (capability === "READ" && FFMCPPolicy.isLocalhost(url)) {
-    return { id: "builtin-localhost-read", name: "Localhost read-only default" };
-  }
   for (const rule of state.rules) {
     if (!rule.enabled || !Array.isArray(rule.capabilities) || !rule.capabilities.includes(capability)) continue;
     try {
@@ -453,7 +455,14 @@ browser.runtime.onMessage.addListener(async (message) => {
         }
         normalized.push(value);
       }
-      const nextRules = normalized.map((rule) => ({ ...rule, id: rule.id || randomId(), enabled: rule.enabled !== false }));
+      const editableRules = normalized.map((rule) => ({ ...rule, id: rule.id || randomId(), enabled: rule.enabled !== false }));
+      const submittedDefault = editableRules.find((rule) => rule.id === FFMCPRuleModel.DEFAULT_RULE_ID);
+      const storedDefault = state.rules.find((rule) => rule.id === FFMCPRuleModel.DEFAULT_RULE_ID);
+      const defaultRule = submittedDefault || storedDefault || FFMCPRuleModel.defaultRule();
+      const nextRules = [
+        defaultRule,
+        ...editableRules.filter((rule) => rule.id !== FFMCPRuleModel.DEFAULT_RULE_ID),
+      ];
       await serializeRules(async () => {
         if (message.rulesRevision !== state.rulesRevision) {
           throw new Error("Rules changed in another window. Reload settings and try again");

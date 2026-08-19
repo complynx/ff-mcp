@@ -1,6 +1,7 @@
 (function (root) {
   "use strict";
 
+  const DEFAULT_RULE_ID = "builtin-localhost-read";
   const PREDICATES = new Set(["host", "glob", "regex", "scheme"]);
 
   function group(operator, children = [], negated = false) {
@@ -28,6 +29,18 @@
       ]),
       group("and", [], true),
     ]);
+  }
+
+  function defaultRule() {
+    const visual = defaultTree();
+    return {
+      id: DEFAULT_RULE_ID,
+      name: "Localhost read access",
+      enabled: true,
+      capabilities: ["READ"],
+      expression: toExpression(visual),
+      visual,
+    };
   }
 
   function fromAst(node) {
@@ -92,5 +105,15 @@
     return node.negated ? `NOT (${expression})` : expression;
   }
 
-  root.FFMCPRuleModel = { blankTree, defaultTree, fromData, fromExpression, group, predicate, toExpression };
+  root.FFMCPRuleModel = {
+    DEFAULT_RULE_ID,
+    blankTree,
+    defaultRule,
+    defaultTree,
+    fromData,
+    fromExpression,
+    group,
+    predicate,
+    toExpression,
+  };
 })(typeof globalThis === "object" ? globalThis : this);

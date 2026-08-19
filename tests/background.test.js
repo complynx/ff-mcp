@@ -23,6 +23,7 @@ let navigateOnGetFrame = false;
 let scriptExecutions = 0;
 const outbound = [];
 const consoleErrors = [];
+const storageWrites = [];
 
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
@@ -80,6 +81,7 @@ globalThis.browser = {
         }
         if (failRulePersistence && values.rules) throw new Error("rule storage unavailable");
         if (failAuditPersistence) throw new Error("storage unavailable");
+        storageWrites.push(values);
       },
     },
   },
@@ -119,6 +121,12 @@ async function bridgeRequest(id, method, params) {
 
 (async () => {
   await tick();
+  const migratedState = await runtimeListener({ type: "ui.state" });
+  const defaultRule = migratedState.rules.find((rule) => rule.id === FFMCPRuleModel.DEFAULT_RULE_ID);
+  assert(defaultRule, "Default localhost rule was not migrated into persistent rules");
+  assert.strictEqual(defaultRule.enabled, true);
+  assert.deepStrictEqual(defaultRule.capabilities, ["READ"]);
+  assert(storageWrites.some((values) => values.rules?.some((rule) => rule.id === defaultRule.id)));
   await runtimeListener({ type: "host.start" });
   nativeMessageListener({
     type: "host.ready",
@@ -259,7 +267,7 @@ async function bridgeRequest(id, method, params) {
   ]);
   const stateAfterConcurrentApproval = await runtimeListener({ type: "ui.state" });
   assert.strictEqual(stateAfterConcurrentApproval.rules.length, rulesBeforeConcurrentApproval + 2);
-  assert.strictEqual(stateAfterConcurrentApproval.rulesRevision, 5);
+  assert.strictEqual(stateAfterConcurrentApproval.rulesRevision, 6);
   const generatedRules = stateAfterConcurrentApproval.rules.filter((rule) => rule.name === "Always allow concurrent.example");
   assert.strictEqual(generatedRules.length, 2);
   for (const rule of generatedRules) {
@@ -428,6 +436,25 @@ async function bridgeRequest(id, method, params) {
   assert.strictEqual(interaction.ok, true);
   assert.strictEqual(interaction.result.performed, "click");
   assert(consoleErrors.length > 0, "Audit persistence failure was not surfaced");
+  failAuditPersistence = false;
+
+  const beforeDefaultEdit = await runtimeListener({ type: "ui.state" });
+  const disabledDefaultRules = beforeDefaultEdit.rules.map((rule) => (
+    rule.id === FFMCPRuleModel.DEFAULT_RULE_ID ? { ...rule, enabled: false } : rule
+  ));
+  await runtimeListener({
+    type: "rules.save",
+    rules: disabledDefaultRules,
+    rulesRevision: beforeDefaultEdit.rulesRevision,
+  });
+  currentInfo = { documentToken: "localhost-document", url: "http://localhost:3000/", title: "Local" };
+  const localhostRequest = await bridgeRequest("disabled-localhost-default", "grants.request", {
+    tabId: 1,
+    capabilities: ["READ"],
+    lifetime: "document",
+  });
+  assert.strictEqual(localhostRequest.result.status, "pending");
+  await runtimeListener({ type: "pending.deny", requestId: localhostRequest.result.requestId });
 
   const stopped = await runtimeListener({ type: "host.stop" });
   assert.strictEqual(stopped.running, false);

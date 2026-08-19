@@ -1,9 +1,12 @@
 """Opt-in smoke test for the extension in an installed Firefox."""
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -12,6 +15,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
+
+if TYPE_CHECKING:
+    from selenium.webdriver.remote.webelement import WebElement
 
 RUN_FIREFOX_TESTS = os.environ.get("FF_MCP_RUN_FIREFOX_TESTS") == "1"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +37,53 @@ def _build_xpi(destination: Path) -> None:
         for source in sorted(EXTENSION_ROOT.rglob("*")):
             if source.is_file():
                 archive.write(source, source.relative_to(EXTENSION_ROOT))
+
+
+def _toggle_closed_and_open(driver: webdriver.Firefox, details: WebElement) -> None:
+    """Verify that a native disclosure can close and reopen."""
+    assert details.get_dom_attribute("open") is not None
+    summary = details.find_element(By.CSS_SELECTOR, ":scope > summary")
+    summary.click()
+    WebDriverWait(driver, 15).until(
+        lambda _current: details.get_dom_attribute("open") is None,
+    )
+    summary.click()
+    WebDriverWait(driver, 15).until(
+        lambda _current: details.get_dom_attribute("open") is not None,
+    )
+
+
+def _edit_default_rule(driver: webdriver.Firefox) -> None:
+    """Verify that the required localhost rule and its containers are editable."""
+    default_rule = driver.find_element(By.CSS_SELECTOR, "details.rule-card.default-rule")
+    rule_name = default_rule.find_element(By.CSS_SELECTOR, "input.rule-name")
+    assert rule_name.is_enabled()
+    assert rule_name.get_dom_attribute("readonly") is None
+    enabled = default_rule.find_element(
+        By.CSS_SELECTOR,
+        ".rule-card-header .inline-check input",
+    )
+    assert enabled.is_enabled()
+    _toggle_closed_and_open(driver, default_rule)
+
+    nested_group = default_rule.find_element(
+        By.CSS_SELECTOR,
+        "details.rule-group details.rule-group",
+    )
+    _toggle_closed_and_open(driver, nested_group)
+
+    first_condition = default_rule.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Condition value']",
+    )
+    assert first_condition.is_enabled()
+    assert first_condition.get_dom_attribute("readonly") is None
+    first_condition.clear()
+    first_condition.send_keys("editable.example")
+    driver.find_element(By.ID, "save").click()
+    WebDriverWait(driver, 15).until(
+        lambda current: current.find_element(By.ID, "save-result").text == "Saved",
+    )
 
 
 def test_extension_starts_in_fresh_firefox_profile() -> None:
@@ -90,9 +143,11 @@ def test_extension_starts_in_fresh_firefox_profile() -> None:
             assert "Main container · AND" in body.text
             assert "NOT AND" in body.text
 
+            _edit_default_rule(driver)
+
             test_url = driver.find_element(By.ID, "test-url")
             test_url.clear()
-            test_url.send_keys("http://localhost:3000/")
+            test_url.send_keys("https://editable.example/")
             driver.find_element(By.ID, "test").click()
             WebDriverWait(driver, 15).until(
                 lambda current: current.find_element(By.ID, "test-result").text == "Matches",
