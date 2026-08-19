@@ -50,10 +50,7 @@ jobs:
           TAG_VERSION: ${{ github.ref_name }}
         run: |
           tag_version="${TAG_VERSION#v}"
-          project_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          extension_version="$(node -p 'require("./extension/manifest.json").version')"
-          test "$tag_version" = "$project_version"
-          test "$tag_version" = "$extension_version"
+          python3 scripts/version.py check --expect "$tag_version"
 
       - name: Sign as an unlisted Firefox extension
         env:

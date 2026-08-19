@@ -43,6 +43,7 @@ jobs:
 
       - name: Check Python quality
         run: |
+          python3 scripts/version.py check
           uv run ruff check .
           uv run ruff format --check .
 

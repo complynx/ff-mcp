@@ -127,8 +127,16 @@ The Firefox extension has no runtime third-party dependencies. It also has no bu
 
 ## Releases
 
-A tag in the form `vX.Y.Z` starts the release workflow. The tag version must match the versions in
-`pyproject.toml` and `extension/manifest.json`.
+Check the four synchronized version sources, or bump all of them with one command:
+
+```sh
+python3 scripts/version.py check
+python3 scripts/version.py bump patch  # also accepts minor, major, or an exact X.Y.Z
+```
+
+A tag in the form `vX.Y.Z` starts the release workflow. CI checks that `pyproject.toml`, the Python
+package, the Firefox manifest, and `uv.lock` all have the same version. The release additionally
+requires the tag to match that version.
 
 The workflow sends the extension to Mozilla Add-ons for unlisted signing. It verifies the returned
 XPI. It then attaches the signed XPI and its SHA-256 file to a GitHub release. These generated files
