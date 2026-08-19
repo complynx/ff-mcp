@@ -92,25 +92,70 @@ jobs:
           release_xpi="release/ff-mcp-${TAG_NAME}-firefox-signed.xpi"
           cp "${signed_xpis[0]}" "$release_xpi"
           sha256sum "$release_xpi" | tee "$release_xpi.sha256"
+          xpi_sha256="$(cut -d ' ' -f 1 "$release_xpi.sha256")"
           echo "path=$release_xpi" >> "$GITHUB_OUTPUT"
           echo "checksum=$release_xpi.sha256" >> "$GITHUB_OUTPUT"
+          echo "sha256=$xpi_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Build Firefox update manifest
+        id: update-manifest
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          XPI_PATH: ${{ steps.signed-xpi.outputs.path }}
+          XPI_SHA256: ${{ steps.signed-xpi.outputs.sha256 }}
+        run: |
+          version="${TAG_NAME#v}"
+          xpi_name="$(basename "$XPI_PATH")"
+          update_link="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/${xpi_name}"
+          update_info_url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
+          update_manifest="release/updates.json"
+          jq -n \
+            --arg addon_id "ff-mcp@local" \
+            --arg version "$version" \
+            --arg update_link "$update_link" \
+            --arg update_hash "sha256:$XPI_SHA256" \
+            --arg update_info_url "$update_info_url" \
+            '{addons: {($addon_id): {updates: [{
+              version: $version,
+              update_link: $update_link,
+              update_hash: $update_hash,
+              update_info_url: $update_info_url,
+              applications: {gecko: {strict_min_version: "150.0"}}
+            }]}}}' > "$update_manifest"
+          jq -e \
+            --arg addon_id "ff-mcp@local" \
+            --arg version "$version" \
+            --arg update_link "$update_link" \
+            --arg update_hash "sha256:$XPI_SHA256" \
+            --arg update_info_url "$update_info_url" \
+            '.addons[$addon_id].updates == [{
+              version: $version,
+              update_link: $update_link,
+              update_hash: $update_hash,
+              update_info_url: $update_info_url,
+              applications: {gecko: {strict_min_version: "150.0"}}
+            }]' "$update_manifest"
+          echo "path=$update_manifest" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           XPI_PATH: ${{ steps.signed-xpi.outputs.path }}
           CHECKSUM_PATH: ${{ steps.signed-xpi.outputs.checksum }}
+          UPDATE_MANIFEST_PATH: ${{ steps.update-manifest.outputs.path }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           if gh release view "$TAG_NAME" > /dev/null 2>&1; then
             gh release upload "$TAG_NAME" \
               "$XPI_PATH#Firefox signed unlisted XPI" \
               "$CHECKSUM_PATH#SHA-256 checksum" \
+              "$UPDATE_MANIFEST_PATH#Firefox update manifest" \
               --clobber
           else
             gh release create "$TAG_NAME" \
               "$XPI_PATH#Firefox signed unlisted XPI" \
               "$CHECKSUM_PATH#SHA-256 checksum" \
+              "$UPDATE_MANIFEST_PATH#Firefox update manifest" \
               --verify-tag \
               --generate-notes \
               --title "$TAG_NAME"

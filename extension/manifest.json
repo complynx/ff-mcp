@@ -12,6 +12,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "ff-mcp@local",
+      "update_url": "https://github.com/complynx/ff-mcp/releases/latest/download/updates.json",
       "data_collection_permissions": {
         "required": [
           "browsingActivity",

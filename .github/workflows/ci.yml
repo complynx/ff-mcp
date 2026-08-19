@@ -92,7 +92,7 @@ jobs:
           NO_UPDATE_NOTIFIER: "1"
         run: |
           report="$RUNNER_TEMP/web-ext-lint.json"
-          ./node_modules/.bin/web-ext lint --source-dir extension --output json > "$report"
+          ./node_modules/.bin/web-ext lint --source-dir extension --self-hosted --output json > "$report"
           node scripts/check-web-ext-lint.js "$report"
 
       - name: Build unsigned extension package

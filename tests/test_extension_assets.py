@@ -14,6 +14,7 @@ PNG_DIMENSION_OFFSET = 16
 PNG_DIMENSION_BYTES = 8
 PNG_COLOR_TYPE_OFFSET = 25
 PNG_RGBA_COLOR_TYPE = 6
+UPDATE_URL = "https://github.com/complynx/ff-mcp/releases/latest/download/updates.json"
 
 
 def _manifest() -> dict[str, Any]:
@@ -41,3 +42,8 @@ def test_manifest_icons_exist_at_declared_sizes_with_alpha() -> None:
             size,
             PNG_RGBA_COLOR_TYPE,
         )
+
+
+def test_manifest_uses_canonical_update_url() -> None:
+    """Keep self-distributed Firefox installs on the stable update channel."""
+    assert _manifest()["browser_specific_settings"]["gecko"]["update_url"] == UPDATE_URL

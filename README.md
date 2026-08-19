@@ -132,7 +132,8 @@ A tag in the form `vX.Y.Z` starts the release workflow. The tag version must mat
 
 The workflow sends the extension to Mozilla Add-ons for unlisted signing. It verifies the returned
 XPI. It then attaches the signed XPI and its SHA-256 file to a GitHub release. These generated files
-stay untracked.
+stay untracked. It also publishes `updates.json` at a stable latest-release URL. Signed versions
+that contain this update URL use the file for automatic self-distributed updates.
 
 Set these secrets in the GitHub `release` environment:
 
