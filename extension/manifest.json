@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ff-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Capability-gated access to Firefox for local MCP clients.",
   "icons": {
     "32": "icons/ff-mcp-32.png",
