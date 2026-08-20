@@ -21,9 +21,13 @@ let holdRulePersistence = false;
 let releaseRulePersistence;
 let navigateOnGetFrame = false;
 let scriptExecutions = 0;
+let failPopupOpen = false;
 const outbound = [];
 const consoleErrors = [];
+const consoleWarnings = [];
 const storageWrites = [];
+const focusedWindows = [];
+const openedPopups = [];
 
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
@@ -36,6 +40,13 @@ globalThis.browser = {
   action: {
     async setBadgeText() {},
     async setBadgeBackgroundColor() {},
+    async openPopup(details) {
+      if (failPopupOpen) throw new Error("popup unavailable");
+      openedPopups.push(details);
+    },
+  },
+  windows: {
+    async update(windowId, details) { focusedWindows.push({ windowId, details }); },
   },
   permissions: { async contains() { return true; } },
   userScripts: {
@@ -88,7 +99,7 @@ globalThis.browser = {
   tabs: {
     onRemoved: { addListener() {} },
     onUpdated: { addListener(listener) { tabUpdatedListener = listener; } },
-    async get() { return { id: 1, url: "https://old.example/", title: "Old" }; },
+    async get() { return { id: 1, windowId: 7, url: "https://old.example/", title: "Old" }; },
     async sendMessage(_tabId, message) {
       if (message.type === "document.info") return { ...currentInfo };
       if (message.type === "page.interact") {
@@ -104,7 +115,9 @@ globalThis.browser = {
 };
 
 const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
 console.error = (...values) => consoleErrors.push(values);
+console.warn = (...values) => consoleWarnings.push(values);
 require("../extension/background.js");
 
 function tick() {
@@ -141,11 +154,25 @@ async function bridgeRequest(id, method, params) {
     capabilities: ["READ"],
     lifetime: "document",
   });
+  assert.deepStrictEqual(focusedWindows.at(-1), { windowId: 7, details: { focused: true } });
+  assert.deepStrictEqual(openedPopups.at(-1), { windowId: 7 });
+  const popupCount = openedPopups.length;
+  const duplicateReadRequest = await bridgeRequest("request-read-duplicate", "grants.request", {
+    tabId: 1,
+    capabilities: ["READ"],
+    lifetime: "document",
+  });
+  assert.strictEqual(duplicateReadRequest.result.requestId, readRequest.result.requestId);
+  assert.strictEqual(openedPopups.length, popupCount);
+  failPopupOpen = true;
   const scriptRequest = await bridgeRequest("request-script-separately", "grants.request", {
     tabId: 1,
     capabilities: ["SCRIPT"],
     lifetime: "document",
   });
+  failPopupOpen = false;
+  assert.strictEqual(scriptRequest.result.status, "pending");
+  assert(consoleWarnings.some((values) => values.some((value) => String(value).includes("remains pending"))));
   assert.notStrictEqual(readRequest.result.requestId, scriptRequest.result.requestId);
   const consentState = await runtimeListener({ type: "ui.state" });
   assert.deepStrictEqual(
@@ -461,9 +488,11 @@ async function bridgeRequest(id, method, params) {
   assert(nativeDisconnectListener, "Native disconnect listener was not registered");
 
   console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
   console.log("background tests passed");
 })().catch((error) => {
   console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
   console.error(error);
   process.exitCode = 1;
 });

@@ -67,6 +67,16 @@ async function updateBadge() {
   await browser.action.setBadgeBackgroundColor({ color: pendingCount ? "#b45309" : "#167d4c" });
 }
 
+async function openPendingPopup(tabId) {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    await browser.windows.update(tab.windowId, { focused: true });
+    await browser.action.openPopup({ windowId: tab.windowId });
+  } catch (error) {
+    console.warn("ff-mcp could not open the access request popup; the request remains pending:", error);
+  }
+}
+
 function startHost() {
   if (state.port) return;
   const port = browser.runtime.connectNative(HOST_NAME);
@@ -203,6 +213,7 @@ async function requestGrant(clientId, params) {
   state.pending.push(pending);
   await audit("grant.requested", { clientId, tabId, capabilities });
   await updateBadge();
+  await openPendingPopup(tabId);
   return { status: "pending", requestId: pending.id, message: "Approve the request from the ff-mcp toolbar popup." };
 }
 
