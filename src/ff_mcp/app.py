@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.server import Settings
+from mcp.types import ToolAnnotations
 
 if TYPE_CHECKING:
     from .bridge import NativeBridge
@@ -52,11 +53,27 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
     async def call(ctx: Context, method: str, params: dict[str, Any]) -> Any:  # ruff: ignore[any-type]
         return await bridge.request(method, params, _client_id(ctx))
 
-    @mcp.tool(description="List open Firefox tabs. This reveals metadata, not page content.")
+    @mcp.tool(
+        description="List open Firefox tabs. This reveals metadata, not page content.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
     async def browser_tabs(ctx: Context) -> dict[str, Any]:
         return await call(ctx, "tabs.list", {})
 
-    @mcp.tool(description="Ask Firefox for revocable capabilities on one tab.")
+    @mcp.tool(
+        description="Ask Firefox for revocable capabilities on one tab.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def browser_request_access(
         tab_id: int,
         capabilities: list[str],
@@ -75,15 +92,39 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             },
         )
 
-    @mcp.tool(description="List active and pending Firefox access grants for this client.")
+    @mcp.tool(
+        description="List active and pending Firefox access grants for this client.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def browser_grants(ctx: Context) -> dict[str, Any]:
         return await call(ctx, "grants.list", {})
 
-    @mcp.tool(description="Immediately revoke a Firefox tab grant.")
+    @mcp.tool(
+        description="Immediately revoke a Firefox tab grant.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def browser_revoke(grant_id: str, ctx: Context) -> dict[str, Any]:
         return await call(ctx, "grants.revoke", {"grantId": grant_id})
 
-    @mcp.tool(description="Read a serialized, non-live snapshot of an authorized tab.")
+    @mcp.tool(
+        description="Read a serialized, non-live snapshot of an authorized tab.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
     async def browser_snapshot(
         tab_id: int,
         ctx: Context,
@@ -97,7 +138,15 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             {"tabId": tab_id, "includeLinks": include_links, "maxChars": max_chars},
         )
 
-    @mcp.tool(description="Query authorized page elements and return serialized data.")
+    @mcp.tool(
+        description="Query authorized page elements and return serialized data.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
     async def browser_query(
         tab_id: int, selector: str, ctx: Context, limit: int = 50
     ) -> dict[str, Any]:
@@ -105,7 +154,15 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             ctx, "page.query", {"tabId": tab_id, "selector": selector, "limit": limit}
         )
 
-    @mcp.tool(description="Click an element in a tab with INTERACT access.")
+    @mcp.tool(
+        description="Click an element in a tab with INTERACT access.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def browser_click(tab_id: int, selector: str, ctx: Context) -> dict[str, Any]:
         return await call(
             ctx,
@@ -113,7 +170,15 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             {"tabId": tab_id, "action": {"kind": "click", "selector": selector}},
         )
 
-    @mcp.tool(description="Type into a form control in a tab with INTERACT access.")
+    @mcp.tool(
+        description="Type into a form control in a tab with INTERACT access.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def browser_type(
         tab_id: int,
         selector: str,
@@ -131,7 +196,15 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             },
         )
 
-    @mcp.tool(description="Scroll a tab or an element in a tab with INTERACT access.")
+    @mcp.tool(
+        description="Scroll a tab or an element in a tab with INTERACT access.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def browser_scroll(
         tab_id: int,
         ctx: Context,
@@ -148,11 +221,27 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             },
         )
 
-    @mcp.tool(description="Navigate a tab with INTERACT access.")
+    @mcp.tool(
+        description="Navigate a tab with INTERACT access.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def browser_navigate(tab_id: int, url: str, ctx: Context) -> dict[str, Any]:
         return await call(ctx, "page.navigate", {"tabId": tab_id, "url": url})
 
-    @mcp.tool(description="Capture an authorized tab. SCREENSHOT access is separate from READ.")
+    @mcp.tool(
+        description="Capture an authorized tab. SCREENSHOT access is separate from READ.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
     async def browser_screenshot(
         tab_id: int,
         ctx: Context,
@@ -176,7 +265,13 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         description=(
             "Execute arbitrary JavaScript in an authorized tab. Requires the separate, high-risk "
             "SCRIPT capability and Firefox's optional userScripts permission."
-        )
+        ),
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
     )
     async def browser_evaluate(
         tab_id: int,
@@ -190,7 +285,15 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             {"tabId": tab_id, "code": code, "world": world},
         )
 
-    @mcp.tool(description="Read recent extension-side authorization and operation audit events.")
+    @mcp.tool(
+        description="Read recent extension-side authorization and operation audit events.",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def browser_audit(ctx: Context, limit: int = 100) -> dict[str, Any]:
         return await call(ctx, "audit.list", {"limit": limit})
 
