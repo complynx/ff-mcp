@@ -170,7 +170,10 @@ function matchingRule(url, capability) {
 }
 
 async function authorization(clientId, tabId, capability, consume = true) {
-  const info = await documentInfo(tabId);
+  return authorizationForInfo(clientId, tabId, capability, await documentInfo(tabId), consume);
+}
+
+function authorizationForInfo(clientId, tabId, capability, info, consume = true) {
   const rule = matchingRule(info.url, capability);
   if (rule) return { source: "rule", ruleId: rule.id, documentToken: info.documentToken, url: info.url };
 
@@ -183,6 +186,93 @@ async function authorization(clientId, tabId, capability, consume = true) {
   const grant = state.grants[index];
   if (consume && grant.lifetime === "once") state.grants.splice(index, 1);
   return { source: "grant", grantId: grant.id, documentToken: info.documentToken, url: info.url };
+}
+
+const WAIT_STATES = new Set(["attached", "detached", "visible", "hidden", "enabled"]);
+
+function waitOptions(params) {
+  const timeout = params.timeoutMs ?? 10000;
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 20000) {
+    throw new Error("timeout_ms must be an integer from 1 to 20000");
+  }
+  const condition = params.waitFor ?? {};
+  if (!condition || typeof condition !== "object" || Array.isArray(condition)) throw new Error("Invalid wait condition");
+  for (const key of Object.keys(condition)) {
+    if (!["selector", "state", "text", "url"].includes(key)) throw new Error(`Unknown wait field: ${key}`);
+  }
+  for (const [key, limit] of [["selector", 1000], ["text", 2000], ["url", 10000]]) {
+    if (condition[key] !== undefined && (typeof condition[key] !== "string" || !condition[key] || condition[key].length > limit)) {
+      throw new Error(`${key} must contain 1 to ${limit} characters`);
+    }
+  }
+  if (condition.state !== undefined && (!condition.selector || !WAIT_STATES.has(condition.state))) {
+    throw new Error("An element state requires a selector and a supported state");
+  }
+  if (condition.url !== undefined) {
+    const url = new URL(condition.url);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("Wait URL must use HTTP(S)");
+  }
+  return { condition, timeout };
+}
+
+class WaitTimeout extends Error {}
+
+// Bound even a content-script request that never settles; always clear its timer.
+async function beforeDeadline(operation, deadline) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new WaitTimeout()), Math.max(0, deadline - Date.now())); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForPage(clientId, tabId, params, generation, navigationFrom = null) {
+  const { condition, timeout } = waitOptions(params);
+  const deadline = Date.now() + timeout;
+  do {
+    if (!currentHost(generation)) throw new Error("MCP session disconnected");
+    try {
+      let info;
+      try { info = await beforeDeadline(documentInfo(tabId), deadline); }
+      catch (error) { if (error instanceof WaitTimeout) throw error; }
+      if (!currentHost(generation)) throw new Error("MCP session disconnected");
+      if (info && info.readyState !== "loading") {
+        if (navigationFrom) {
+          if (info.documentToken !== navigationFrom.documentToken || info.url !== navigationFrom.url) {
+            return { status: "ready", url: info.url };
+          }
+        } else {
+          const auth = authorizationForInfo(clientId, tabId, "READ", info, false);
+          let result;
+          try {
+            result = await beforeDeadline(browser.tabs.sendMessage(tabId, {
+              type: "page.wait", condition, params,
+              expectedDocumentToken: auth.documentToken, expectedUrl: auth.url,
+            }), deadline);
+          } catch (error) {
+            if (!/document changed|document URL changed|Receiving end|message port|Could not establish/i.test(error.message)) throw error;
+          }
+          if (!currentHost(generation)) throw new Error("MCP session disconnected");
+          // Revocation during the probe must prevent the result from escaping.
+          authorizationForInfo(clientId, tabId, "READ", info, false);
+          if (result?.matched) {
+            authorizationForInfo(clientId, tabId, "READ", info);
+            return { status: "ready", snapshot: result.snapshot };
+          }
+        }
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+    } catch (error) {
+      if (error instanceof WaitTimeout) break;
+      throw error;
+    }
+  } while (Date.now() <= deadline);
+  return { status: "timeout", timeoutMs: timeout };
 }
 
 function identity(params) {
@@ -376,7 +466,17 @@ async function executeBridge(method, params, clientId, generation) {
       await audit("grant.revoked", { clientId, grantId: params.grantId });
       return { revoked: state.grants.length < before };
     }
+    case "page.wait": {
+      const result = await waitForPage(clientId, Number(params.tabId), params, generation);
+      await audit("page.wait", { clientId, tabId: params.tabId, status: result.status });
+      return result;
+    }
     case "page.snapshot": {
+      if (params.waitFor !== undefined) {
+        const waited = await waitForPage(clientId, Number(params.tabId), params, generation);
+        await audit("page.snapshot", { clientId, tabId: params.tabId, status: waited.status });
+        return waited.status === "ready" ? waited.snapshot : waited;
+      }
       const auth = await authorization(clientId, Number(params.tabId), "READ");
       const result = await browser.tabs.sendMessage(Number(params.tabId), { type: "page.snapshot", params, expectedDocumentToken: auth.documentToken, expectedUrl: auth.url });
       await audit("page.snapshot", { clientId, tabId: params.tabId, auth });
@@ -424,6 +524,7 @@ async function executeBridge(method, params, clientId, generation) {
       return result;
     }
     case "page.navigate": {
+      waitOptions(params);
       const auth = await authorization(clientId, Number(params.tabId), "INTERACT");
       const destination = new URL(params.url);
       if (!["http:", "https:"].includes(destination.protocol)) throw new Error("Only HTTP(S) navigation is allowed");
@@ -435,7 +536,12 @@ async function executeBridge(method, params, clientId, generation) {
         expectedUrl: auth.url,
       });
       await audit("page.navigate", { clientId, tabId: params.tabId, url: destination.href, auth });
-      return { tabId, url: destination.href };
+      const result = { tabId, url: destination.href };
+      if (params.waitUntil !== "none") {
+        try { result.wait = await waitForPage(clientId, tabId, params, generation, auth); }
+        catch (error) { result.wait = { status: "error", message: error.message }; }
+      }
+      return result;
     }
     case "page.screenshot": {
       const tabId = Number(params.tabId);

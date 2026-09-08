@@ -119,6 +119,28 @@ assert.throws(() => messageListener({
   type: "page.interact", action: { kind: "click", selector: first.elements[0].ref },
 }), /stale/);
 
+button.isConnected = true;
+button.getAttribute = () => null;
+button.matches = () => false;
+document.querySelector = (selector) => selector === "button" ? button : null;
+globalThis.getComputedStyle = () => ({ visibility: "visible" });
+document.readyState = "complete";
+const condition = async (value) => (await messageListener({
+  type: "page.wait", condition: value, expectedDocumentToken: "document-token", expectedUrl: location.href,
+})).matched;
+assert.strictEqual(await condition({ selector: "button", state: "enabled", text: "Submit", url: location.href }), true);
+button.disabled = true;
+assert.strictEqual(await condition({ selector: "button", state: "enabled" }), false);
+assert.strictEqual(await condition({ selector: "missing", state: "detached" }), true);
+assert.strictEqual(await condition({ selector: "missing", state: "visible" }), false);
+assert.strictEqual(await condition({ selector: "button", text: "different text" }), false);
+globalThis.getComputedStyle = () => ({ visibility: "hidden" });
+assert.strictEqual(await condition({ selector: "button", state: "hidden" }), true);
+assert.strictEqual(await condition({ selector: "button", state: "visible" }), false);
+assert.strictEqual(await condition({ url: "https://other.test/" }), false);
+document.readyState = "loading";
+assert.strictEqual(await condition({}), false);
+
 console.log("content tests passed");
 })().catch((error) => {
   console.error(error);

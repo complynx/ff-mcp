@@ -43,7 +43,7 @@ UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv sync --locked --group dev
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff format --check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run pytest -q
-node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js
+node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js tests/waits.test.js
 ```
 
 Preserve Firefox capability boundary. Setup convenience must not weaken consent, session isolation, or

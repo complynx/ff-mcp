@@ -94,6 +94,40 @@ INTERACT, executes at most 20 click/type/scroll actions in order, and returns a 
 failure and reports `completed`; inspect that result before retrying. A page navigation or transport
 failure can interrupt the response after actions have run. Async UI updates can need another snapshot.
 
+### Wait for page readiness
+
+`browser_navigate` sends navigation once, then waits for the destination content script by default.
+Its `wait` result reports `ready`, `timeout`, or `error`; a timeout does not undo the navigation.
+Set `wait_until: "none"` for the previous immediate-return behavior.
+
+Use `browser_wait` or `browser_snapshot(wait_for=...)` for asynchronous UI updates. Conditions are
+combined with AND. An empty condition waits for an accessible document. Supported fields are:
+
+- `selector`: CSS selector or a current-document `@ref`.
+- `state`: `attached`, `detached`, `visible` (default), `hidden`, or `enabled`; requires a selector.
+- `text`: case-sensitive substring in the element's rendered text, or the page text without a selector.
+- `url`: exact absolute HTTP(S) URL, including query and fragment.
+
+For example, after opening a review dialog:
+
+```json
+{
+  "tab_id": 22,
+  "wait_for": {"selector": "[role=dialog] button[type=submit]", "state": "enabled"},
+  "timeout_ms": 10000
+}
+```
+
+`browser_wait` returns `{status: "ready", snapshot: ...}` or `{status: "timeout", timeoutMs: ...}`.
+A waiting `browser_snapshot` returns its normal snapshot on success or the same timeout object.
+Both require READ access, recheck consent during waiting, and consume a one-use grant only on success.
+Use a tab-session grant and CSS selectors for waits that span navigation.
+
+Timeouts default to 10 seconds and accept 1–20,000 milliseconds. Polling is bounded even when a content script does not answer. Waits do not retry actions,
+wait for network-idle, or guarantee that all asynchronous work is finished. Use a condition that
+represents the next action's prerequisite. Batches remain synchronous; split a batch at an async
+boundary, wait for the condition, then continue.
+
 ## Policy rules
 
 Open the extension options page to use the visual policy editor. Each new rule has one main `AND`
@@ -118,7 +152,7 @@ UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv sync --locked --group dev
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff format --check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run pytest -q
-node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js
+node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js tests/waits.test.js
 ```
 
 Run the Firefox integration test only when you want to start Firefox with a temporary profile:

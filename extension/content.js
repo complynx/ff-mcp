@@ -91,6 +91,34 @@
     return result;
   }
 
+  function conditionMatches(condition) {
+    if (document.readyState === "loading") return false;
+    if (condition.url !== undefined && new URL(condition.url).href !== location.href) return false;
+    let element;
+    if (condition.selector !== undefined) {
+      element = condition.selector.startsWith("@")
+        ? references.get(condition.selector) : document.querySelector(condition.selector);
+      if (element?.isConnected === false) element = null;
+      const visible = Boolean(element && element.getClientRects().length &&
+        !["hidden", "collapse"].includes(getComputedStyle(element).visibility));
+      switch (condition.state || "visible") {
+        case "attached": if (!element) return false; break;
+        case "detached": if (element) return false; break;
+        case "visible": if (!visible) return false; break;
+        case "hidden": if (visible) return false; break;
+        case "enabled":
+          if (!visible || element.disabled || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") return false;
+          break;
+        default: throw new Error("Unsupported wait state");
+      }
+    }
+    if (condition.text !== undefined) {
+      const text = condition.selector ? element?.innerText : document.body?.innerText;
+      if (!String(text || "").includes(condition.text)) return false;
+    }
+    return true;
+  }
+
   function target(selector) {
     const element = typeof selector === "string" && selector.startsWith("@")
       ? references.get(selector) : document.querySelector(selector);
@@ -148,7 +176,11 @@
       return Promise.reject(new Error("The document URL changed after access was authorized"));
     }
     switch (message && message.type) {
-      case "document.info": return Promise.resolve({ documentToken, url: location.href, title: document.title });
+      case "document.info": return Promise.resolve({ documentToken, url: location.href, title: document.title, readyState: document.readyState });
+      case "page.wait": {
+        const matched = conditionMatches(message.condition || {});
+        return Promise.resolve({ matched, snapshot: matched ? snapshot(message.params || {}) : undefined });
+      }
       case "page.snapshot": return Promise.resolve(snapshot(message.params || {}));
       case "page.query": return Promise.resolve({ documentToken, elements: query(message.selector, message.limit) });
       case "page.actions": {
