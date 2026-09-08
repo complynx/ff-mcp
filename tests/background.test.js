@@ -11,9 +11,12 @@ require("../extension/shared/policy.js");
 require("../extension/shared/rule-model.js");
 
 let runtimeListener;
+let alarmListener;
 let nativeMessageListener;
 let nativeDisconnectListener;
 let tabUpdatedListener;
+let documentQueriesUntilHold = 0;
+let releaseDocumentInfo;
 let currentInfo = { documentToken: "new-document", url: "https://new.example/", title: "New" };
 let failAuditPersistence = false;
 let failRulePersistence = false;
@@ -37,6 +40,7 @@ const port = {
 };
 
 globalThis.browser = {
+  alarms: { create() {}, async clear() {}, onAlarm: { addListener(listener) { alarmListener = listener; } } },
   action: {
     async setBadgeText() {},
     async setBadgeBackgroundColor() {},
@@ -101,7 +105,14 @@ globalThis.browser = {
     onUpdated: { addListener(listener) { tabUpdatedListener = listener; } },
     async get() { return { id: 1, windowId: 7, url: "https://old.example/", title: "Old" }; },
     async sendMessage(_tabId, message) {
-      if (message.type === "document.info") return { ...currentInfo };
+      if (message.type === "document.info") {
+        const info = { ...currentInfo };
+        if (documentQueriesUntilHold > 0 && --documentQueriesUntilHold === 0) {
+          await new Promise((resolve) => { releaseDocumentInfo = resolve; });
+        }
+        return info;
+      }
+      if (message.type === "page.actions") return { completed: message.actions.length };
       if (message.type === "page.interact") {
         return { documentToken: currentInfo.documentToken, performed: message.action.kind };
       }
@@ -124,8 +135,8 @@ function tick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-async function bridgeRequest(id, method, params) {
-  nativeMessageListener({ type: "bridge.request", id, method, params, clientId: "test-client" });
+async function bridgeRequest(id, method, params, clientId = "test-client") {
+  nativeMessageListener({ type: "bridge.request", id, method, params: { agent: "Codex", model: "test-model", harness: "test-harness", reason: "Test browser access", ...params }, clientId });
   for (let attempt = 0; attempt < 5; attempt += 1) await tick();
   const response = outbound.find((message) => message.type === "bridge.response" && message.id === id);
   assert(response, `Missing bridge response for ${id}`);
@@ -134,6 +145,7 @@ async function bridgeRequest(id, method, params) {
 
 (async () => {
   await tick();
+  assert(nativeMessageListener, "Enabled extension did not start the host automatically");
   const migratedState = await runtimeListener({ type: "ui.state" });
   const defaultRule = migratedState.rules.find((rule) => rule.id === FFMCPRuleModel.DEFAULT_RULE_ID);
   assert(defaultRule, "Default localhost rule was not migrated into persistent rules");
@@ -483,8 +495,109 @@ async function bridgeRequest(id, method, params) {
   assert.strictEqual(localhostRequest.result.status, "pending");
   await runtimeListener({ type: "pending.deny", requestId: localhostRequest.result.requestId });
 
+  currentInfo = { documentToken: "isolated", url: "https://isolated.example/", title: "Isolated" };
+  const missingIdentity = await bridgeRequest("missing-identity", "grants.request", {
+    tabId: 1, capabilities: ["READ"], model: " ",
+  });
+  assert.strictEqual(missingIdentity.ok, false);
+  assert.match(missingIdentity.error.message, /model must contain/);
+  const isolated = await bridgeRequest("isolated-grant", "grants.request", {
+    tabId: 1, capabilities: ["READ", "INTERACT"], lifetime: "once",
+  });
+  const identityState = await runtimeListener({ type: "ui.state" });
+  const pendingIdentity = identityState.pending.find((item) => item.id === isolated.result.requestId);
+  assert.strictEqual(pendingIdentity.agent, "Codex");
+  assert.strictEqual(pendingIdentity.model, "test-model");
+  assert.strictEqual(pendingIdentity.harness, "test-harness");
+  assert.strictEqual(pendingIdentity.reason, "Test browser access");
+  await runtimeListener({ type: "pending.approve", requestId: isolated.result.requestId, lifetime: "once" });
+  const otherClient = await bridgeRequest("other-session", "page.interact", {
+    tabId: 1, action: { kind: "click", selector: "button" },
+  }, "other-client");
+  assert.strictEqual(otherClient.ok, false);
+  const actions = await bridgeRequest("batch-once", "page.actions", {
+    tabId: 1, actions: [{ kind: "click", selector: "button" }],
+  });
+  assert.strictEqual(actions.ok, true);
+  const consumed = await bridgeRequest("batch-consumed", "page.actions", {
+    tabId: 1, actions: [{ kind: "click", selector: "button" }],
+  });
+  assert.strictEqual(consumed.ok, false);
+  const persistent = await bridgeRequest("shared-rule", "grants.request", {
+    tabId: 1, capabilities: ["INTERACT"], lifetime: "persistent",
+  });
+  await runtimeListener({ type: "pending.approve", requestId: persistent.result.requestId, lifetime: "persistent" });
+  const sharedAccess = await bridgeRequest("shared-access", "page.interact", {
+    tabId: 1, action: { kind: "click", selector: "button" },
+  }, "other-client");
+  assert.strictEqual(sharedAccess.ok, true);
+  const foreignAudit = await bridgeRequest("foreign-audit", "audit.list", {}, "other-client");
+  assert(foreignAudit.result.events.every((event) => event.clientId === "other-client"));
+
+  for (const shutdown of ["stop", "disconnect"]) {
+    await runtimeListener({ type: "host.start" });
+    currentInfo = { documentToken: `stale-${shutdown}`, url: "https://stale-session.example/", title: "Stale" };
+    documentQueriesUntilHold = 3;
+    releaseDocumentInfo = undefined;
+    const popupCountBeforeShutdown = openedPopups.length;
+    nativeMessageListener({
+      type: "bridge.request", id: `stale-${shutdown}`, method: "grants.request", clientId: "old-session",
+      params: { tabId: 1, capabilities: ["READ"], agent: "Agent", model: "Model", harness: "Harness", reason: "Read page" },
+    });
+    for (let attempt = 0; attempt < 5; attempt += 1) await tick();
+    assert(releaseDocumentInfo, "The final document query was not held");
+    if (shutdown === "stop") {
+      await runtimeListener({ type: "host.stop" });
+    } else {
+      nativeDisconnectListener();
+      await alarmListener({ name: "reconnect" });
+    }
+    releaseDocumentInfo();
+    for (let attempt = 0; attempt < 5; attempt += 1) await tick();
+    const afterShutdown = await runtimeListener({ type: "ui.state" });
+    assert.strictEqual(afterShutdown.pending.length, 0);
+    assert.strictEqual(afterShutdown.grants.length, 0);
+    assert.strictEqual(openedPopups.length, popupCountBeforeShutdown);
+    assert(!outbound.some((message) => message.type === "bridge.response" && message.id === `stale-${shutdown}`));
+  }
+
+  for (const shutdown of ["stop", "disconnect"]) {
+    await runtimeListener({ type: "host.start" });
+    currentInfo = { documentToken: `rollback-${shutdown}`, url: "https://rollback-session.example/", title: "Rollback" };
+    const request = await bridgeRequest(`rollback-${shutdown}`, "grants.request", {
+      tabId: 1, capabilities: ["READ"], lifetime: "persistent",
+    });
+    holdRulePersistence = true;
+    const approval = runtimeListener({ type: "pending.approve", requestId: request.result.requestId, lifetime: "persistent" });
+    for (let attempt = 0; attempt < 5; attempt += 1) await tick();
+    assert(releaseRulePersistence, "The persistent approval write was not held");
+    if (shutdown === "stop") {
+      await runtimeListener({ type: "host.stop" });
+    } else {
+      nativeDisconnectListener();
+      const disconnected = await runtimeListener({ type: "ui.state" });
+      assert.strictEqual(disconnected.enabled, true);
+      assert.strictEqual(disconnected.running, false);
+      await alarmListener({ name: "reconnect" });
+    }
+    failRulePersistence = true;
+    const rejectedApproval = assert.rejects(approval, /rule storage unavailable/);
+    releaseRulePersistence();
+    await rejectedApproval;
+    holdRulePersistence = false;
+    failRulePersistence = false;
+    const afterRollback = await runtimeListener({ type: "ui.state" });
+    assert.strictEqual(afterRollback.pending.length, 0);
+    assert.strictEqual(afterRollback.grants.length, 0);
+  }
+
   const stopped = await runtimeListener({ type: "host.stop" });
   assert.strictEqual(stopped.running, false);
+  assert.strictEqual(stopped.grants.length, 0);
+  assert.strictEqual(stopped.pending.length, 0);
+  assert(storageWrites.some((values) => values.enabled === false));
+  await alarmListener({ name: "reconnect" });
+  assert.strictEqual((await runtimeListener({ type: "ui.state" })).starting, false);
   assert(nativeDisconnectListener, "Native disconnect listener was not registered");
 
   console.error = originalConsoleError;

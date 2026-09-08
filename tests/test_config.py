@@ -9,35 +9,34 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ff_mcp.config import CONFIG_MODE, DEFAULT_PORT, MIN_TOKEN_LENGTH, load_or_create_config
+from ff_mcp.config import CONFIG_MODE, DEFAULT_PORT, load_or_create_config
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_creates_secure_random_config(tmp_path: Path) -> None:
-    """Create a random token and the default port when config is absent."""
+def test_creates_config(tmp_path: Path) -> None:
+    """Create the default port configuration when config is absent."""
     path = tmp_path / "nested" / "config.json"
     config = load_or_create_config(path)
-    assert len(config.token) >= MIN_TOKEN_LENGTH
+    assert "token" not in json.loads(path.read_text())
     assert config.port == DEFAULT_PORT
     assert path.exists()
 
 
-def test_rejects_short_token(tmp_path: Path) -> None:
-    """Reject a token that lacks sufficient entropy."""
+def test_accepts_legacy_token_config(tmp_path: Path) -> None:
+    """Load older configurations without requiring their unused token."""
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps({"token": "short", "port": DEFAULT_PORT}),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match=f"at least {MIN_TOKEN_LENGTH}"):
-        load_or_create_config(path)
+    assert load_or_create_config(path).port == DEFAULT_PORT
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not available on Windows")
 def test_created_config_is_owner_only(tmp_path: Path) -> None:
-    """Create the bearer-token file without a group/world-readable window."""
+    """Create the configuration file without a group/world-readable window."""
     path = tmp_path / "config.json"
     load_or_create_config(path)
     assert stat.S_IMODE(path.stat().st_mode) == CONFIG_MODE
@@ -45,10 +44,10 @@ def test_created_config_is_owner_only(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not available on Windows")
 def test_existing_config_permissions_are_repaired(tmp_path: Path) -> None:
-    """Restrict an existing bearer-token file before loading it."""
+    """Restrict an existing configuration file before loading it."""
     path = tmp_path / "config.json"
     path.write_text(
-        json.dumps({"token": "x" * MIN_TOKEN_LENGTH, "port": DEFAULT_PORT}),
+        json.dumps({"token": "x" * 32, "port": DEFAULT_PORT}),
         encoding="utf-8",
     )
     path.chmod(0o644)

@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import uvicorn
 
-from .app import BearerAuthMiddleware, create_mcp
+from .app import LocalOriginMiddleware, create_mcp
 from .bridge import BridgeError, NativeBridge, NativeWriter, read_native_message
 from .config import default_config_path, load_or_create_config
 from .installer import HOST_NAME, install_native_manifest
@@ -78,14 +78,9 @@ def _read_messages(
         loop.call_soon_threadsafe(stopping.set)
 
 
-def _connection_payload(*, show_token: bool) -> dict[str, Any]:
+def _connection_payload() -> dict[str, Any]:
     config = load_or_create_config()
-    token = config.token if show_token else "<redacted; run with --show-token>"
-    return {
-        "url": f"http://127.0.0.1:{config.port}/mcp",
-        "headers": {"Authorization": f"Bearer {token}"},
-        "token_env": "FF_MCP_TOKEN",
-    }
+    return {"url": f"http://127.0.0.1:{config.port}/mcp"}
 
 
 def _print_profiles(*, json_output: bool) -> None:
@@ -178,7 +173,7 @@ def _run_setup(args: argparse.Namespace) -> None:
     result: dict[str, Any] = {
         "native_manifest": str(manifest_path),
         "config": str(config_path),
-        "connection": _connection_payload(show_token=False),
+        "connection": _connection_payload(),
         "profiles": [profile.as_dict() for profile in profiles],
     }
 
@@ -215,8 +210,8 @@ def _run_setup(args: argparse.Namespace) -> None:
     else:
         sys.stdout.write("Choose a profile from `ff-mcp profiles`, then rerun with --profile.\n")
     sys.stdout.write(
-        "After installing, open the ff-mcp toolbar popup, press Start, and configure your MCP "
-        "client with the private-token steps in docs/agent-setup.md.\n"
+        "After installing, ff-mcp listens automatically. Configure your MCP "
+        "client with the URL in docs/agent-setup.md.\n"
     )
 
 
@@ -234,7 +229,7 @@ async def serve_native() -> None:
     stopping = asyncio.Event()
 
     mcp = create_mcp(bridge)
-    app = BearerAuthMiddleware(mcp.streamable_http_app(), config.token, config.allowed_origins)
+    app = LocalOriginMiddleware(mcp.streamable_http_app())
     uvicorn_config = uvicorn.Config(
         app,
         host="127.0.0.1",
@@ -263,7 +258,6 @@ async def serve_native() -> None:
             "type": "host.ready",
             "hostName": HOST_NAME,
             "url": f"http://127.0.0.1:{config.port}/mcp",
-            "token": config.token,
             "serverInstanceId": str(uuid4()),
         }
     )
@@ -302,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     connection.add_argument(
         "--show-token",
         action="store_true",
-        help="Include the sensitive bearer token in output",
+        help="Deprecated; connections no longer use a shared token",
     )
     setup = subparsers.add_parser("setup", help="Prepare ff-mcp for a local Firefox profile")
     setup.add_argument("--profile", help="Explicit Firefox profile name or directory")
@@ -338,9 +332,7 @@ def main() -> None:
         _print_profiles(json_output=args.json)
         return
     if args.command == "connection":
-        sys.stdout.write(
-            json.dumps(_connection_payload(show_token=args.show_token), indent=2) + "\n"
-        )
+        sys.stdout.write(json.dumps(_connection_payload(), indent=2) + "\n")
         return
     if args.command == "setup":
         preparing_addon = args.install_addon or args.download_addon

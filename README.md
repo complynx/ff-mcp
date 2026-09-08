@@ -17,12 +17,13 @@ read a page, interact with a page, run a script, or take a screenshot.
 - List tab metadata.
 - Request `READ`, `INTERACT`, `SCRIPT`, or `SCREENSHOT` access for one tab.
 - Grant access once, for one document, for one tab session, or for a host until you remove the rule.
-- Read bounded page snapshots and CSS query results.
+- Read bounded snapshots with stable document-scoped element references and CSS query results.
+- Batch up to 20 known actions and return a snapshot in one tool call.
 - Click, type, scroll, and navigate with structured operations.
 - Run JavaScript only after a separate `SCRIPT` grant.
 - Build persistent rules with a visual editor.
 - Audit access decisions and sensitive operations in Firefox.
-- Use a generated bearer token on a loopback-only MCP server.
+- Listen automatically while enabled on a loopback-only MCP server.
 
 ## Requirements
 
@@ -49,21 +50,16 @@ ff-mcp profiles --json
 ff-mcp setup --profile "/path/to/your/profile" --install-addon
 ```
 
-Confirm the installation in Firefox. Then open the ff-mcp toolbar popup and select **Start**.
+Confirm the installation in Firefox. The enabled extension starts listening automatically.
 
 For extension development, open `about:debugging`. Select **This Firefox**. Select
 **Load Temporary Add-on**. Then select [extension/manifest.json](extension/manifest.json).
 
 ## Connect an MCP client
 
-Run this command in a private terminal:
-
-```sh
-ff-mcp connection --show-token
-```
-
-Do not paste the token into chat, an issue, or a tracked file. Put the token in your MCP client's
-secret store or environment. The endpoint is available only while the extension is connected.
+Run `ff-mcp connection` for the local URL. No token or connection approval is needed.
+Remove bearer-token settings from older client entries. Each MCP instance uses a separate
+stateful HTTP session. Browser-origin HTTP requests are rejected.
 
 See the [user setup guide](docs/user-setup.md#connect-your-mcp-client) for Codex, Claude Code, and
 generic MCP client examples.
@@ -71,7 +67,7 @@ generic MCP client examples.
 ## Permission flow
 
 1. Call `browser_tabs` and select a tab ID.
-2. Call `browser_request_access` with the required capabilities.
+2. Call `browser_request_access` with capabilities, agent name, model, harness, and a brief task reason.
 3. Approve or reject the request in Firefox.
 4. Use the approved browser tool.
 5. Revoke the grant in Firefox or with `browser_revoke`.
@@ -84,6 +80,19 @@ generic MCP client examples.
 - `::1`
 
 This default does not grant `INTERACT`, `SCRIPT`, or `SCREENSHOT` access.
+
+## Efficient browser use
+
+Request the needed capabilities together with `lifetime: "tab_session"` to keep approval through
+navigation. The popup still lets the user choose a shorter lifetime. Request only what the task needs.
+Use `browser_snapshot` to get visible controls with `@ref` selectors; pass these directly to click,
+type, or batch actions. References become invalid when the document changes. CSS selectors also work.
+The default text limit is 12,000 characters; increase `max_chars` when needed.
+
+Use `browser_actions` for a known sequence such as filling several fields. It requires READ and
+INTERACT, executes at most 20 click/type/scroll actions in order, and returns a snapshot. It stops on
+failure and reports `completed`; inspect that result before retrying. A page navigation or transport
+failure can interrupt the response after actions have run. Async UI updates can need another snapshot.
 
 ## Policy rules
 
@@ -109,7 +118,7 @@ UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv sync --locked --group dev
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff format --check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run pytest -q
-node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js
+node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js
 ```
 
 Run the Firefox integration test only when you want to start Firefox with a temporary profile:
@@ -158,8 +167,10 @@ Unlisted signing does not add the extension to AMO search results.
 - Approved page data and browser activity go to the local native host and MCP client.
 - Firefox blocks content scripts on restricted pages such as `about:` pages and the add-ons store.
 - A tab-session grant stays active after navigation in that tab. A document grant does not.
-- One bearer token defines one local trust domain. Use separate configurations for clients that do
-  not trust each other.
+- Temporary grants are bound to one MCP session. A reconnect with a new session needs new grants.
+- Persistent rules (including default localhost READ) apply to every session and local client.
+- Agent/model/harness labels are supplied by the client, not verified identities.
+- Local clients can list tab metadata without approval. Approvals gate page operations.
 - A click or input operation can cause page actions. Grant `INTERACT` access with care.
 - `SCRIPT` gives full page control. A main-world script can read and change page-owned JavaScript
   state. Grant it only to clients and sites that you trust.

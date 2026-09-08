@@ -87,6 +87,38 @@ await assert.rejects(
   /document URL changed/i,
 );
 
+location.href = "https://example.test/";
+let clicks = 0;
+const button = {
+  tagName: "BUTTON", innerText: "Submit", isConnected: true,
+  hasAttribute() { return false; },
+  getClientRects() { return [{}]; },
+  scrollIntoView() {},
+  click() { clicks += 1; },
+};
+document.forms = [];
+document.querySelectorAll = (selector) => selector.includes("button") ? [button] : [];
+document.querySelector = () => null;
+const first = await messageListener({ type: "page.snapshot", params: {} });
+const second = await messageListener({ type: "page.snapshot", params: {} });
+assert.strictEqual(first.elements[0].ref, second.elements[0].ref);
+const batch = await messageListener({
+  type: "page.actions", expectedDocumentToken: "document-token", expectedUrl: location.href,
+  actions: [
+    { kind: "click", selector: first.elements[0].ref },
+    { kind: "click", selector: "@missing" },
+    { kind: "click", selector: first.elements[0].ref },
+  ],
+});
+assert.strictEqual(batch.completed, 1);
+assert.strictEqual(clicks, 1);
+assert.match(batch.error, /No element/);
+assert(batch.snapshot);
+button.isConnected = false;
+assert.throws(() => messageListener({
+  type: "page.interact", action: { kind: "click", selector: first.elements[0].ref },
+}), /stale/);
+
 console.log("content tests passed");
 })().catch((error) => {
   console.error(error);

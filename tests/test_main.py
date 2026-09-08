@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -76,28 +75,25 @@ def test_windows_native_stdio_is_binary() -> None:
     assert setmode.call_args_list == [call(10, 32768), call(11, 32768)]
 
 
-def test_connection_redacts_token_by_default(capsys: pytest.CaptureFixture[str]) -> None:
-    """Do not expose the local bearer token without an explicit CLI flag."""
-    token = secrets.token_urlsafe(32)
+def test_connection_returns_url_without_authentication(capsys: pytest.CaptureFixture[str]) -> None:
+    """Return the local URL without an authentication header."""
     with (
         patch.object(sys, "argv", ["ff-mcp", "connection"]),
-        patch("ff_mcp.__main__.load_or_create_config", return_value=HostConfig(token=token)),
+        patch("ff_mcp.__main__.load_or_create_config", return_value=HostConfig()),
     ):
         native_main.main()
     output = capsys.readouterr().out
-    assert token not in output
-    assert "<redacted; run with --show-token>" in output
+    assert json.loads(output) == {"url": "http://127.0.0.1:8765/mcp"}
 
 
-def test_connection_can_explicitly_show_token(capsys: pytest.CaptureFixture[str]) -> None:
-    """Return the token only when the local user explicitly requests it."""
-    token = secrets.token_urlsafe(32)
+def test_legacy_show_token_flag_returns_only_url(capsys: pytest.CaptureFixture[str]) -> None:
+    """Accept the deprecated flag without returning a token."""
     with (
         patch.object(sys, "argv", ["ff-mcp", "connection", "--show-token"]),
-        patch("ff_mcp.__main__.load_or_create_config", return_value=HostConfig(token=token)),
+        patch("ff_mcp.__main__.load_or_create_config", return_value=HostConfig()),
     ):
         native_main.main()
-    assert token in capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out) == {"url": "http://127.0.0.1:8765/mcp"}
 
 
 def test_setup_requires_explicit_profile_for_addon_install() -> None:
@@ -133,7 +129,7 @@ def test_prepares_download_without_launching_firefox(
     )
     download_directory = tmp_path / "downloads"
     xpi_path = download_directory / "signed.xpi"
-    config = HostConfig(token=secrets.token_urlsafe(32))
+    config = HostConfig()
     arguments = [
         "ff-mcp",
         "setup",

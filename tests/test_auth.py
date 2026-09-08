@@ -1,4 +1,4 @@
-"""Tests for localhost MCP bearer authentication."""
+"""Tests for localhost MCP origin isolation."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ff_mcp.app import BearerAuthMiddleware
+from ff_mcp.app import LocalOriginMiddleware
 
 type Message = dict[str, Any]
 type Receive = Callable[[], Awaitable[Message]]
@@ -31,7 +31,7 @@ async def _request(headers: list[tuple[bytes, bytes]]) -> tuple[bool, list[Messa
         await asyncio.sleep(0)
         messages.append(message)
 
-    middleware = BearerAuthMiddleware(app, "x" * 32)
+    middleware = LocalOriginMiddleware(app)
     await middleware({"type": "http", "headers": headers}, receive, send)
     return called, messages
 
@@ -44,11 +44,11 @@ async def test_valid_bearer_without_origin_is_allowed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_bearer_is_rejected() -> None:
-    """Reject requests that omit the bearer token."""
+async def test_local_client_needs_no_bearer() -> None:
+    """Allow local MCP clients to connect without a shared secret."""
     called, messages = await _request([])
-    assert not called
-    assert messages[0]["status"] == HTTPStatus.UNAUTHORIZED
+    assert called
+    assert not messages
 
 
 @pytest.mark.asyncio
@@ -60,5 +60,19 @@ async def test_browser_origin_is_rejected() -> None:
             (b"origin", b"https://attacker.example"),
         ]
     )
+    assert not called
+    assert messages[0]["status"] == HTTPStatus.FORBIDDEN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    [[(b"origin", b"null")], [(b"origin", b"")], [(b"sec-fetch-site", b"same-site")]],
+)
+async def test_browser_requests_without_bearer_are_rejected(
+    headers: list[tuple[bytes, bytes]],
+) -> None:
+    """Reject opaque origins and browser fetches without consulting a bearer token."""
+    called, messages = await _request(headers)
     assert not called
     assert messages[0]["status"] == HTTPStatus.FORBIDDEN

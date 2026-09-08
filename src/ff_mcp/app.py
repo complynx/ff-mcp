@@ -3,22 +3,59 @@
 from __future__ import annotations
 
 import base64
-import hmac
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+from uuid import uuid4
+from weakref import WeakKeyDictionary
 
 from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.server import Settings
 from mcp.types import ToolAnnotations
 
 if TYPE_CHECKING:
+    from mcp.server.session import ServerSession
+
     from .bridge import NativeBridge
 
 
+_SESSION_IDS: WeakKeyDictionary[ServerSession, str] = WeakKeyDictionary()
+
+
+class ClickAction(TypedDict):
+    """Click one CSS selector or snapshot reference."""
+
+    kind: Literal["click"]
+    selector: str
+
+
+class TypeAction(TypedDict):
+    """Fill or append text in an editable element."""
+
+    kind: Literal["type"]
+    selector: str
+    text: str
+    clear: NotRequired[bool]
+
+
+class ScrollAction(TypedDict):
+    """Scroll the page or a selected element by pixel offsets."""
+
+    kind: Literal["scroll"]
+    selector: NotRequired[str]
+    x: NotRequired[int]
+    y: NotRequired[int]
+
+
+type BrowserAction = ClickAction | TypeAction | ScrollAction
+
+
 def _client_id(ctx: Context) -> str:
-    value = ctx.client_id or "local-mcp-client"
-    return str(value)[:128]
+    # Bind grants to the server session, never client-supplied metadata.
+    session = ctx.session
+    if session not in _SESSION_IDS:
+        _SESSION_IDS[session] = str(uuid4())
+    return _SESSION_IDS[session]
 
 
 def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structure]
@@ -43,10 +80,13 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         "ff-mcp",
         instructions=(
             "Controls the user's existing Firefox only after Firefox-side capability checks. "
-            "Call browser_request_access when an operation reports that access is required."
+            "Call browser_request_access with agent, model, harness and task before page access. "
+            "Use tab_session lifetime to retain approval through navigation. "
+            "Snapshots return @ref selectors; use browser_actions to batch known actions. "
+            "Inspect results before choosing subsequent actions."
         ),
         json_response=True,
-        stateless_http=True,
+        stateless_http=False,
     )
 
     # MCP tool payloads are intentionally dynamic JSON values at this boundary.
@@ -66,7 +106,11 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         return await call(ctx, "tabs.list", {})
 
     @mcp.tool(
-        description="Ask Firefox for revocable capabilities on one tab.",
+        description=(
+            "Ask Firefox for revocable capabilities on one tab. Supply your agent name, model, "
+            "harness (1-128 characters each) and task reason (1-500 characters). "
+            "Persistent approvals apply to all sessions."
+        ),
         annotations=ToolAnnotations(
             readOnlyHint=False,
             destructiveHint=False,
@@ -74,12 +118,16 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             openWorldHint=True,
         ),
     )
-    async def browser_request_access(
+    async def browser_request_access(  # ruff: ignore[too-many-arguments] - explicit consent fields
         tab_id: int,
         capabilities: list[str],
         ctx: Context,
-        lifetime: str = "document",
-        reason: str = "",
+        *,
+        agent: str,
+        model: str,
+        harness: str,
+        reason: str,
+        lifetime: str = "tab_session",
     ) -> dict[str, Any]:
         return await call(
             ctx,
@@ -88,7 +136,10 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
                 "tabId": tab_id,
                 "capabilities": capabilities,
                 "lifetime": lifetime,
-                "reason": reason[:500],
+                "reason": reason,
+                "agent": agent,
+                "model": model,
+                "harness": harness,
             },
         )
 
@@ -130,7 +181,7 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         ctx: Context,
         *,
         include_links: bool = True,
-        max_chars: int = 50_000,
+        max_chars: int = 12_000,
     ) -> dict[str, Any]:
         return await call(
             ctx,
@@ -222,6 +273,21 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         )
 
     @mcp.tool(
+        description=(
+            "Run up to 20 known click/type/scroll actions in order on one document, then "
+            "return a snapshot. Uses CSS or @ref selectors. Requires READ and INTERACT. "
+            "Stops on the first error and reports completed actions; do not blindly retry."
+        ),
+        annotations=ToolAnnotations(
+            readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+        ),
+    )
+    async def browser_actions(
+        tab_id: int, actions: list[BrowserAction], ctx: Context
+    ) -> dict[str, Any]:
+        return await call(ctx, "page.actions", {"tabId": tab_id, "actions": actions})
+
+    @mcp.tool(
         description="Navigate a tab with INTERACT access.",
         annotations=ToolAnnotations(
             readOnlyHint=False,
@@ -286,7 +352,7 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         )
 
     @mcp.tool(
-        description="Read recent extension-side authorization and operation audit events.",
+        description="Read this session's recent authorization and operation audit events.",
         annotations=ToolAnnotations(
             readOnlyHint=True,
             destructiveHint=False,
@@ -310,14 +376,12 @@ ASGIApp = Callable[
 ]
 
 
-class BearerAuthMiddleware:
-    """Small localhost auth layer that also rejects unexpected browser origins."""
+class LocalOriginMiddleware:
+    """Reject browser-origin requests to the local MCP endpoint."""
 
-    def __init__(self, app: ASGIApp, token: str, allowed_origins: tuple[str, ...] = ()) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         """Initialize the middleware with its downstream app and access policy."""
         self.app = app
-        self.token = token
-        self.allowed_origins = set(allowed_origins)
 
     async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
         """Authenticate an ASGI request before forwarding it downstream."""
@@ -325,15 +389,8 @@ class BearerAuthMiddleware:
             await self.app(scope, receive, send)
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
-        supplied = headers.get(b"authorization", b"").decode("latin-1")
-        expected = f"Bearer {self.token}"
-        origin = headers.get(b"origin")
-        origin_value = origin.decode("latin-1") if origin else None
-        if not hmac.compare_digest(supplied, expected):
-            await self._reject(send, 401, b"Missing or invalid bearer token")
-            return
-        if origin_value is not None and origin_value not in self.allowed_origins:
-            await self._reject(send, 403, b"Origin is not allowed")
+        if b"origin" in headers or headers.get(b"sec-fetch-site") not in {None, b"none"}:
+            await self._reject(send, 403, b"Browser-origin requests are not allowed")
             return
         await self.app(scope, receive, send)
 
