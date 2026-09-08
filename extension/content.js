@@ -63,7 +63,8 @@
     if (name) result.name = name;
     if (String(label || "").replace(/\s+/g, " ").trim().length > 300) result.nameTruncated = true;
     for (const key of ["role", "type", "href"]) {
-      const value = element.getAttribute(key);
+      const value = key === "href" && typeof element.href === "string"
+        ? element.href : element.getAttribute(key);
       if (value) {
         result[key] = clipped(value, 1000);
         if (String(value).length > 1000) result[`${key}Truncated`] = true;

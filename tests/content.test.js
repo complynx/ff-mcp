@@ -121,6 +121,17 @@ assert.strictEqual(labelled.elements[0].name, "Send request");
 assert.strictEqual(labelled.elements[0].expanded, "false");
 assert.strictEqual(full.forms[0].fields[0].ref, labelled.elements[0].ref);
 assert(JSON.stringify(labelled).length < JSON.stringify(full).length);
+const link = {
+  ...button, tagName: "A", innerText: "Guide", href: "https://cdn.test/docs/guide",
+  getAttribute: (key) => key === "href" ? "guide" : null,
+};
+document.querySelectorAll = (selector) => selector.includes("a[href]") ? [link] : [];
+const linked = await messageListener({ type: "page.snapshot" });
+assert.strictEqual(linked.elements[0].href, "https://cdn.test/docs/guide");
+link.href = `https://cdn.test/${"x".repeat(1100)}`;
+const longLink = await messageListener({ type: "page.snapshot" });
+assert.strictEqual(longLink.elements[0].href.length, 1000);
+assert.strictEqual(longLink.elements[0].hrefTruncated, true);
 const hidden = { ...button, getClientRects: () => [] };
 document.body.innerText = "x".repeat(1100);
 document.querySelectorAll = (selector) => selector.includes("button") ?
