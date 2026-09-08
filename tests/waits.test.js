@@ -158,6 +158,19 @@ test("navigation waits for replacement document and never retries the mutation",
   assert.equal(h.navigations(), 2);
 });
 
+test("navigation to the current fragment is ready without replacing the document", async () => {
+  for (const fragment of ["#details", "#"]) {
+    const h = await harness();
+    const url = `https://example.test/${fragment}`;
+    h.setInfo(() => ({ ...h.info(), url }));
+    h.setNavigate(() => {});
+    await h.grant(["INTERACT"]);
+    const response = await h.request("page.navigate", { tabId: 1, url, timeoutMs: 20 });
+    assert.equal(response.result.wait.status, "ready");
+    assert.equal(h.navigations(), 1);
+  }
+});
+
 test("invalid wait timeout fails before navigation", async () => {
   const h = await harness();
   await h.grant(["INTERACT"]);

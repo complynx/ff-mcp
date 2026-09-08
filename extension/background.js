@@ -242,7 +242,9 @@ async function waitForPage(clientId, tabId, params, generation, navigationFrom =
       if (!currentHost(generation)) throw new Error("MCP session disconnected");
       if (info && info.readyState !== "loading") {
         if (navigationFrom) {
-          if (info.documentToken !== navigationFrom.documentToken || info.url !== navigationFrom.url) {
+          const sameFragment = navigationFrom.destination.includes("#") &&
+            navigationFrom.destination === navigationFrom.url && info.url === navigationFrom.destination;
+          if (sameFragment || info.documentToken !== navigationFrom.documentToken || info.url !== navigationFrom.url) {
             return { status: "ready", url: info.url };
           }
         } else {
@@ -538,7 +540,7 @@ async function executeBridge(method, params, clientId, generation) {
       await audit("page.navigate", { clientId, tabId: params.tabId, url: destination.href, auth });
       const result = { tabId, url: destination.href };
       if (params.waitUntil !== "none") {
-        try { result.wait = await waitForPage(clientId, tabId, params, generation, auth); }
+        try { result.wait = await waitForPage(clientId, tabId, params, generation, { ...auth, destination: destination.href }); }
         catch (error) { result.wait = { status: "error", message: error.message }; }
       }
       return result;
