@@ -50,6 +50,15 @@ class ScrollAction(TypedDict):
 type BrowserAction = ClickAction | TypeAction | ScrollAction
 
 
+class WaitCondition(TypedDict, total=False):
+    """Conditions combined with AND; an empty condition waits for the document."""
+
+    selector: str
+    state: Literal["attached", "detached", "visible", "hidden", "enabled"]
+    text: str
+    url: str
+
+
 def _client_id(ctx: Context) -> str:
     # Bind grants to the server session, never client-supplied metadata.
     session = ctx.session
@@ -83,6 +92,7 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             "Call browser_request_access with agent, model, harness and task before page access. "
             "Use tab_session lifetime to retain approval through navigation. "
             "Snapshots return @ref selectors; use browser_actions to batch known actions. "
+            "Use browser_wait or browser_snapshot(wait_for=...) for asynchronous UI changes. "
             "Inspect results before choosing subsequent actions."
         ),
         json_response=True,
@@ -168,7 +178,14 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         return await call(ctx, "grants.revoke", {"grantId": grant_id})
 
     @mcp.tool(
-        description="Read a serialized, non-live snapshot of an authorized tab.",
+        description=(
+            "Read a serialized snapshot with READ access. "
+            "Compact controls are the default; compact=false includes full attributes, forms "
+            "and links. "
+            "Optionally wait_for a document, selector state, text substring, or exact URL "
+            "before taking it (timeout_ms: 1-20000). "
+            "Returns a timeout object if the condition is not met; does not retry actions."
+        ),
         annotations=ToolAnnotations(
             readOnlyHint=True,
             destructiveHint=False,
@@ -176,17 +193,44 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             openWorldHint=True,
         ),
     )
-    async def browser_snapshot(
+    async def browser_snapshot(  # ruff: ignore[too-many-arguments] - snapshot and wait options
         tab_id: int,
         ctx: Context,
         *,
         include_links: bool = True,
         max_chars: int = 12_000,
+        compact: bool = True,
+        wait_for: WaitCondition | None = None,
+        timeout_ms: int = 10_000,
     ) -> dict[str, Any]:
         return await call(
             ctx,
             "page.snapshot",
-            {"tabId": tab_id, "includeLinks": include_links, "maxChars": max_chars},
+            {
+                "tabId": tab_id,
+                "includeLinks": include_links,
+                "maxChars": max_chars,
+                "compact": compact,
+                **({"waitFor": wait_for, "timeoutMs": timeout_ms} if wait_for is not None else {}),
+            },
+        )
+
+    @mcp.tool(
+        description=(
+            "Wait up to timeout_ms (1-20000) for an authorized document, then return a snapshot. "
+            "Conditions are combined with AND: selector (CSS or @ref), element state (default "
+            "visible), text substring, and exact absolute URL. Requires READ. Returns ready or "
+            "timeout status. No page actions are retried. Use tab_session grants across navigation."
+        ),
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+        ),
+    )
+    async def browser_wait(
+        tab_id: int, ctx: Context, wait_for: WaitCondition | None = None, timeout_ms: int = 10_000
+    ) -> dict[str, Any]:
+        return await call(
+            ctx, "page.wait", {"tabId": tab_id, "waitFor": wait_for or {}, "timeoutMs": timeout_ms}
         )
 
     @mcp.tool(
@@ -288,7 +332,12 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         return await call(ctx, "page.actions", {"tabId": tab_id, "actions": actions})
 
     @mcp.tool(
-        description="Navigate a tab with INTERACT access.",
+        description=(
+            "Navigate once with INTERACT access and wait for the destination content script. "
+            "wait_until=none skips waiting. A wait timeout/error does not undo navigation: "
+            "inspect the tab instead of retrying the action. This does not wait for all async UI. "
+            "Use browser_snapshot(wait_for=...) or browser_wait for a specific UI condition."
+        ),
         annotations=ToolAnnotations(
             readOnlyHint=False,
             destructiveHint=False,
@@ -296,8 +345,24 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
             openWorldHint=True,
         ),
     )
-    async def browser_navigate(tab_id: int, url: str, ctx: Context) -> dict[str, Any]:
-        return await call(ctx, "page.navigate", {"tabId": tab_id, "url": url})
+    async def browser_navigate(
+        tab_id: int,
+        url: str,
+        ctx: Context,
+        *,
+        wait_until: Literal["ready", "none"] = "ready",
+        timeout_ms: int = 10_000,
+    ) -> dict[str, Any]:
+        return await call(
+            ctx,
+            "page.navigate",
+            {
+                "tabId": tab_id,
+                "url": url,
+                "waitUntil": wait_until,
+                "timeoutMs": timeout_ms,
+            },
+        )
 
     @mcp.tool(
         description="Capture an authorized tab. SCREENSHOT access is separate from READ.",

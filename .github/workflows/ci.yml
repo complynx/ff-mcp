@@ -79,6 +79,7 @@ jobs:
           node tests/background.test.js
           node tests/content.test.js
           node tests/popup.test.js
+          node tests/waits.test.js
 
       - name: Check JavaScript syntax
         run: |

@@ -5,8 +5,9 @@ import pytest
 from ff_mcp.app import create_mcp
 from ff_mcp.bridge import NativeBridge
 
-EXPECTED_TOOL_COUNT = 14
+EXPECTED_TOOL_COUNT = 15
 EXPECTED_ANNOTATIONS = {
+    "browser_wait": (True, False, True, True),
     "browser_actions": (False, True, False, True),
     "browser_audit": (True, False, True, False),
     "browser_click": (False, True, False, True),
