@@ -89,6 +89,16 @@ Use `browser_snapshot` to get visible controls with `@ref` selectors; pass these
 type, or batch actions. References become invalid when the document changes. CSS selectors also work.
 The default text limit is 12,000 characters; increase `max_chars` when needed.
 
+Snapshots are compact by default, including those returned by waits and action batches. Visible
+controls appear once in `elements`, with stable references, short names (ARIA labels, associated
+labels, or visible text), link targets, and relevant state. Compact snapshots omit the duplicate
+`forms` and `links` lists and empty attributes. They retain page text and visible headings for context.
+`truncation` reports text clipping and omitted controls or headings; individual shortened names and
+link targets carry truncation flags. Controls are limited to 200. Use `browser_query` for controls
+beyond that limit. Use `browser_snapshot(compact=false)` for full attributes, form structure, and
+the separate links list; `include_links` controls that list only in full mode. Input values are not
+included in either mode.
+
 Use `browser_actions` for a known sequence such as filling several fields. It requires READ and
 INTERACT, executes at most 20 click/type/scroll actions in order, and returns a snapshot. It stops on
 failure and reports `completed`; inspect that result before retrying. A page navigation or transport

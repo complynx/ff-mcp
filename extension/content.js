@@ -46,13 +46,48 @@
     return Array.from(document.querySelectorAll(selector)).slice(0, boundedLimit).map(elementData);
   }
 
+  function visible(element) {
+    return Boolean(element.getClientRects().length &&
+      !["hidden", "collapse"].includes(getComputedStyle(element).visibility));
+  }
+
+  // Keep one actionable record per control; never include input values.
+  function compactElement(element) {
+    const labelledBy = (element.getAttribute("aria-labelledby") || "").split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent || "").join(" ").trim();
+    const label = labelledBy || element.getAttribute("aria-label") ||
+      Array.from(element.labels || []).map((item) => item.innerText).join(" ") ||
+      element.innerText || element.getAttribute("title") || element.getAttribute("placeholder");
+    const result = { ref: reference(element), tag: element.tagName.toLowerCase() };
+    const name = clipped(label, 300);
+    if (name) result.name = name;
+    if (String(label || "").replace(/\s+/g, " ").trim().length > 300) result.nameTruncated = true;
+    for (const key of ["role", "type", "href"]) {
+      const value = element.getAttribute(key);
+      if (value) {
+        result[key] = clipped(value, 1000);
+        if (String(value).length > 1000) result[`${key}Truncated`] = true;
+      }
+    }
+    if (element.disabled || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") result.disabled = true;
+    if (["checkbox", "radio"].includes(element.type)) result.checked = Boolean(element.checked);
+    for (const key of ["checked", "expanded", "selected", "pressed"]) {
+      const value = element.getAttribute(`aria-${key}`);
+      if (value !== null) result[key] = value;
+    }
+    return result;
+  }
+
   function snapshot(params) {
+    const compact = params.compact !== false;
     const maxChars = Math.max(1000, Math.min(Number(params.maxChars) || 12000, 200000));
-    const headings = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6"))
+    const headingElements = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6"))
+      .filter((element) => !compact || visible(element));
+    const headings = headingElements
       .slice(0, 200)
       .map((element) => ({ level: Number(element.tagName.slice(1)), text: clipped(element.innerText) }));
     let remainingFields = MAX_SNAPSHOT_FIELDS;
-    const forms = Array.from(document.forms).slice(0, 100).map((form) => {
+    const forms = (compact ? [] : Array.from(document.forms).slice(0, 100)).map((form) => {
       const fields = Array.from(form.elements).slice(0, remainingFields).map(elementData);
       remainingFields -= fields.length;
       return {
@@ -65,20 +100,27 @@
     for (const [ref, element] of references) {
       if (element.isConnected === false) references.delete(ref);
     }
-    const result = {
-      elements: Array.from(document.querySelectorAll(
+    const controls = Array.from(document.querySelectorAll(
         "a[href],button,input,textarea,select,[role=button],[role=link],[contenteditable=true]"
-      )).filter((element) => element.getClientRects().length).slice(0, 200).map(elementData),
+      )).filter((element) => compact ? visible(element) : element.getClientRects().length);
+    const bodyText = String(document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    const result = {
+      elements: controls.slice(0, 200).map(compact ? compactElement : elementData),
       documentToken,
       url: clipped(location.href),
       title: clipped(document.title),
       language: clipped(document.documentElement.lang, 100) || null,
       text: clipped(document.body ? document.body.innerText : "", maxChars),
       headings,
-      forms,
+      ...(compact ? { compact: true, truncation: {
+        text: bodyText.length > maxChars,
+        omittedElements: Math.max(0, controls.length - 200),
+        omittedHeadings: Math.max(0, headingElements.length - 200),
+        headingText: headingElements.slice(0, 200).some((element) => String(element.innerText || "").replace(/\s+/g, " ").trim().length > 2000),
+      } } : { forms }),
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
     };
-    if (params.includeLinks !== false) {
+    if (!compact && params.includeLinks !== false) {
       result.links = Array.from(document.links).slice(0, 500).map((link) => ({
         ref: reference(link),
         text: clipped(link.innerText),

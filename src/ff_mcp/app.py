@@ -179,8 +179,11 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
 
     @mcp.tool(
         description=(
-            "Read a serialized snapshot with READ access. Optionally wait_for a document, selector "
-            "state, text substring, or exact URL before taking it (timeout_ms: 1-20000). "
+            "Read a serialized snapshot with READ access. "
+            "Compact controls are the default; compact=false includes full attributes, forms "
+            "and links. "
+            "Optionally wait_for a document, selector state, text substring, or exact URL "
+            "before taking it (timeout_ms: 1-20000). "
             "Returns a timeout object if the condition is not met; does not retry actions."
         ),
         annotations=ToolAnnotations(
@@ -196,6 +199,7 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
         *,
         include_links: bool = True,
         max_chars: int = 12_000,
+        compact: bool = True,
         wait_for: WaitCondition | None = None,
         timeout_ms: int = 10_000,
     ) -> dict[str, Any]:
@@ -206,6 +210,7 @@ def create_mcp(bridge: NativeBridge) -> FastMCP:  # ruff: ignore[complex-structu
                 "tabId": tab_id,
                 "includeLinks": include_links,
                 "maxChars": max_chars,
+                "compact": compact,
                 **({"waitFor": wait_for, "timeoutMs": timeout_ms} if wait_for is not None else {}),
             },
         )

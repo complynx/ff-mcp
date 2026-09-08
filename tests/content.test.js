@@ -13,6 +13,7 @@ globalThis.innerWidth = 1280;
 globalThis.innerHeight = 720;
 globalThis.scrollX = 0;
 globalThis.scrollY = 0;
+globalThis.getComputedStyle = () => ({ visibility: "visible" });
 
 const repeated = "x".repeat(1000);
 const field = {
@@ -43,6 +44,7 @@ globalThis.document = {
   title: "Snapshot",
   forms: largeForms,
   links: largeLinks,
+  getElementById() { return null; },
   querySelectorAll(selector) { return selector === "h1,h2,h3,h4,h5,h6" ? largeHeadings : []; },
 };
 
@@ -55,7 +57,7 @@ require("../extension/content.js");
 
 (async () => {
 assert.throws(
-  () => messageListener({ type: "page.snapshot", params: { maxChars: 1000 } }),
+  () => messageListener({ type: "page.snapshot", params: { maxChars: 1000, compact: false } }),
   /Snapshot exceeds the 4 MiB result limit/,
 );
 
@@ -92,6 +94,8 @@ let clicks = 0;
 const button = {
   tagName: "BUTTON", innerText: "Submit", isConnected: true,
   hasAttribute() { return false; },
+  getAttribute() { return null; },
+  matches() { return false; },
   getClientRects() { return [{}]; },
   scrollIntoView() {},
   click() { clicks += 1; },
@@ -102,6 +106,32 @@ document.querySelector = () => null;
 const first = await messageListener({ type: "page.snapshot", params: {} });
 const second = await messageListener({ type: "page.snapshot", params: {} });
 assert.strictEqual(first.elements[0].ref, second.elements[0].ref);
+assert.strictEqual(first.elements[0].name, "Submit");
+assert.strictEqual(first.forms, undefined);
+assert.strictEqual(first.links, undefined);
+assert.strictEqual(first.elements[0].attributes, undefined);
+const attributes = { "aria-labelledby": "label", "aria-label": "Fallback", "aria-expanded": "false" };
+button.getAttribute = (key) => attributes[key] ?? null;
+button.hasAttribute = (key) => key in attributes;
+document.getElementById = (id) => id === "label" ? { textContent: "Send request" } : null;
+document.forms = [{ action: "https://example.test/send", method: "post", elements: [button] }];
+const labelled = await messageListener({ type: "page.snapshot" });
+const full = await messageListener({ type: "page.snapshot", params: { compact: false } });
+assert.strictEqual(labelled.elements[0].name, "Send request");
+assert.strictEqual(labelled.elements[0].expanded, "false");
+assert.strictEqual(full.forms[0].fields[0].ref, labelled.elements[0].ref);
+assert(JSON.stringify(labelled).length < JSON.stringify(full).length);
+const hidden = { ...button, getClientRects: () => [] };
+document.body.innerText = "x".repeat(1100);
+document.querySelectorAll = (selector) => selector.includes("button") ?
+  [hidden, ...Array.from({ length: 201 }, () => ({ ...button }))] : [];
+const bounded = await messageListener({ type: "page.snapshot", params: { maxChars: 1000 } });
+assert.strictEqual(bounded.elements.length, 200);
+assert.strictEqual(bounded.truncation.omittedElements, 1);
+assert.strictEqual(bounded.truncation.text, true);
+document.body.innerText = "body";
+document.querySelectorAll = (selector) => selector.includes("button") ? [button] : [];
+button.getAttribute = () => null;
 const batch = await messageListener({
   type: "page.actions", expectedDocumentToken: "document-token", expectedUrl: location.href,
   actions: [
