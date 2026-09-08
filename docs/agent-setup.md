@@ -1,7 +1,7 @@
 # Agent setup runbook
 
 Audience: local coding agent on same desktop as Firefox. Goal: install ff-mcp while user keeps
-profile, add-on, secret, and capability control.
+profile, add-on, and capability control.
 
 ## Boundaries
 
@@ -9,7 +9,6 @@ profile, add-on, secret, and capability control.
 - Ask before GUI launch or external config write.
 - Never accept Firefox prompt for user.
 - Never bypass prompt by copying XPI into profile.
-- Never run token-revealing command in captured tool.
 - Never start `ff-mcp serve`; Firefox owns host lifecycle.
 
 ## 1. Check
@@ -71,19 +70,12 @@ Dev-only temporary load: user opens `about:debugging` → **This Firefox** → *
 
 ## 4. Start
 
-User opens ff-mcp popup and presses **Start**. Snap/Flatpak may ask for native-messaging portal
+The enabled extension starts the host automatically. The popup can stop or restart it. Snap/Flatpak may ask for native-messaging portal
 access. User approves.
 
 Host listens on `127.0.0.1` only. Endpoint exists only while popup connection remains active.
 
-**Secret rule:** User runs next command privately, outside agent-captured output:
-
-```sh
-ff-mcp connection --show-token
-```
-
-User puts token in client environment/secret store. Agent never asks user to paste token into chat.
-Safe diagnostic command: `ff-mcp connection` returns redacted token.
+Run `ff-mcp connection` to get the local URL. No token is needed.
 
 ## 5. Configure client
 
@@ -91,27 +83,25 @@ Ask before changing client config outside repo. Inspect existing `ff-mcp` entry 
 
 ### Codex
 
-User sets `FF_MCP_TOKEN` in environment that launches Codex. Then agent/user runs:
+Run:
 
 ```sh
 codex mcp add ff-mcp \
-  --url http://127.0.0.1:8765/mcp \
-  --bearer-token-env-var FF_MCP_TOKEN
+  --url http://127.0.0.1:8765/mcp
 codex mcp get ff-mcp --json
 ```
 
-Token env must exist for future Codex processes. Restart if client cannot reload. Reference:
+Restart if the client cannot reload. Reference:
 [Codex MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
 
 ### Claude Code
 
-User sets `FF_MCP_TOKEN` in environment that launches Claude. Then agent/user runs:
+Run:
 
 ```sh
 claude mcp add \
   --transport http \
   --scope local \
-  --header 'Authorization: Bearer ${FF_MCP_TOKEN}' \
   ff-mcp http://127.0.0.1:8765/mcp
 claude mcp get ff-mcp
 ```
@@ -121,25 +111,22 @@ Local scope keeps config outside repo. Reference:
 
 ### Other client
 
-Need Streamable HTTP endpoint plus bearer header:
+Use this Streamable HTTP endpoint:
 
 ```json
 {
   "type": "http",
-  "url": "http://127.0.0.1:8765/mcp",
-  "headers": {
-    "Authorization": "Bearer YOUR_LOCAL_TOKEN"
-  }
+  "url": "http://127.0.0.1:8765/mcp"
 }
 ```
 
-Prefer secret store or environment expansion. Never put token in tracked file.
+No shared token or connection approval is needed. Keep the MCP session header returned by initialization.
 
 ## 6. Verify
 
 1. Client lists ff-mcp tools.
 2. Call `browser_tabs`.
-3. Request harmless-page `READ` with `browser_request_access`.
+3. Request harmless-page `READ` with `browser_request_access`, including agent, model, harness, and task reason.
 4. User approves in Firefox.
 5. Read page.
 6. Revoke with `browser_revoke`.

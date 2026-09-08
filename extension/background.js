@@ -4,6 +4,7 @@ const HOST_NAME = "io.github.ff_mcp";
 const CAPABILITIES = new Set(["READ", "INTERACT", "SCRIPT", "SCREENSHOT"]);
 const LIFETIMES = new Set(["once", "document", "tab_session", "persistent"]);
 const state = {
+  enabled: true,
   port: null,
   host: null,
   grants: [],
@@ -16,8 +17,10 @@ const pendingApprovals = new Set();
 const approvalTabs = new Map();
 const invalidatedApprovals = new Set();
 let rulesQueue = Promise.resolve();
+let hostGeneration = 0;
 
-const ready = browser.storage.local.get(["rules", "rulesRevision", "audit"]).then(async (stored) => {
+const ready = browser.storage.local.get(["rules", "rulesRevision", "audit", "enabled"]).then(async (stored) => {
+  state.enabled = stored.enabled !== false;
   state.rules = Array.isArray(stored.rules) ? stored.rules : [];
   state.rulesRevision = Number.isSafeInteger(stored.rulesRevision) && stored.rulesRevision >= 0 ? stored.rulesRevision : 0;
   state.audit = Array.isArray(stored.audit) ? stored.audit : [];
@@ -40,6 +43,7 @@ function serializeRules(operation) {
 
 function publicState() {
   return {
+    enabled: state.enabled,
     running: Boolean(state.port && state.host),
     starting: Boolean(state.port && !state.host),
     host: state.host,
@@ -67,10 +71,17 @@ async function updateBadge() {
   await browser.action.setBadgeBackgroundColor({ color: pendingCount ? "#b45309" : "#167d4c" });
 }
 
-async function openPendingPopup(tabId) {
+function currentHost(generation) {
+  return state.enabled && state.port && generation === hostGeneration;
+}
+
+async function openPendingPopup(tabId, generation) {
   try {
+    if (!currentHost(generation)) return;
     const tab = await browser.tabs.get(tabId);
+    if (!currentHost(generation)) return;
     await browser.windows.update(tab.windowId, { focused: true });
+    if (!currentHost(generation)) return;
     await browser.action.openPopup({ windowId: tab.windowId });
   } catch (error) {
     console.warn("ff-mcp could not open the access request popup; the request remains pending:", error);
@@ -80,13 +91,14 @@ async function openPendingPopup(tabId) {
 function startHost() {
   if (state.port) return;
   const port = browser.runtime.connectNative(HOST_NAME);
+  const generation = ++hostGeneration;
   state.port = port;
   state.host = null;
   port.onMessage.addListener((message) => {
+    if (!currentHost(generation)) return;
     if (message.type === "host.ready") {
       state.host = {
         url: message.url,
-        token: message.token,
         serverInstanceId: message.serverInstanceId,
       };
       audit("host.started", { url: message.url });
@@ -99,8 +111,12 @@ function startHost() {
     const error = browser.runtime.lastError;
     if (error) console.warn("ff-mcp native host disconnected:", error.message);
     if (state.port === port) {
+      hostGeneration += 1;
       state.port = null;
       state.host = null;
+      state.grants = [];
+      state.pending = [];
+      if (state.enabled) browser.alarms.create("reconnect", { delayInMinutes: 0.1 });
       updateBadge();
     }
     audit("host.stopped", error ? { error: error.message } : {});
@@ -110,6 +126,9 @@ function startHost() {
 }
 
 function stopHost() {
+  hostGeneration += 1;
+  state.grants = [];
+  state.pending = [];
   if (!state.port) return;
   const port = state.port;
   state.port = null;
@@ -166,7 +185,20 @@ async function authorization(clientId, tabId, capability, consume = true) {
   return { source: "grant", grantId: grant.id, documentToken: info.documentToken, url: info.url };
 }
 
-async function requestGrant(clientId, params) {
+function identity(params) {
+  const result = {};
+  for (const key of ["agent", "model", "harness", "reason"]) {
+    const limit = key === "reason" ? 500 : 128;
+    if (typeof params[key] !== "string" || !params[key].trim() || params[key].length > limit) {
+      throw new Error(`${key} must contain 1 to ${limit} characters`);
+    }
+    result[key] = params[key].trim();
+  }
+  return result;
+}
+
+async function requestGrant(clientId, params, generation) {
+  const requester = identity(params);
   const tabId = Number(params.tabId);
   const capabilities = validCapabilities(params.capabilities);
   const lifetime = LIFETIMES.has(params.lifetime) ? params.lifetime : "document";
@@ -189,7 +221,9 @@ async function requestGrant(clientId, params) {
     return { status: "granted", capabilities };
   }
   info = await documentInfo(tabId);
+  if (!currentHost(generation)) throw new Error("MCP session disconnected");
   const existing = state.pending.find((pending) =>
+    Object.keys(requester).every((key) => pending[key] === requester[key]) &&
     pending.clientId === clientId && pending.tabId === tabId &&
     pending.documentToken === info.documentToken && pending.requestedLifetime === lifetime &&
     pending.capabilities.length === capabilities.length &&
@@ -207,17 +241,18 @@ async function requestGrant(clientId, params) {
     url: info.url,
     capabilities,
     requestedLifetime: lifetime,
-    reason: String(params.reason || "").slice(0, 500),
+    ...requester,
     createdAt: new Date().toISOString(),
   };
   state.pending.push(pending);
   await audit("grant.requested", { clientId, tabId, capabilities });
   await updateBadge();
-  await openPendingPopup(tabId);
+  await openPendingPopup(tabId, generation);
   return { status: "pending", requestId: pending.id, message: "Approve the request from the ff-mcp toolbar popup." };
 }
 
 async function approvePending(requestId, lifetime) {
+  const generation = hostGeneration;
   const requested = state.pending.find((pending) => pending.id === requestId);
   if (!requested) throw new Error("Pending request no longer exists");
   if (pendingApprovals.has(requestId)) throw new Error("Pending request is already being approved");
@@ -268,11 +303,11 @@ async function approvePending(requestId, lifetime) {
         try {
           await browser.storage.local.set({ rules: nextRules, rulesRevision: nextRevision });
         } catch (error) {
-          let restore = !invalidatedApprovals.has(requestId);
+          let restore = currentHost(generation) && !invalidatedApprovals.has(requestId);
           if (restore) {
             try {
               const rollbackInfo = await documentInfo(pending.tabId);
-              restore = !invalidatedApprovals.has(requestId) &&
+              restore = currentHost(generation) && !invalidatedApprovals.has(requestId) &&
                 rollbackInfo.documentToken === pending.documentToken &&
                 new URL(rollbackInfo.url).href === new URL(pending.url).href;
             } catch (_) {
@@ -296,6 +331,10 @@ async function approvePending(requestId, lifetime) {
         capabilities: pending.capabilities,
         lifetime: selectedLifetime,
         createdAt: new Date().toISOString(),
+        agent: pending.agent,
+        model: pending.model,
+        harness: pending.harness,
+        reason: pending.reason,
         title: pending.title,
         url: pending.url,
       });
@@ -321,14 +360,15 @@ async function denyPending(requestId) {
   return publicState();
 }
 
-async function executeBridge(method, params, clientId) {
+async function executeBridge(method, params, clientId, generation) {
   await ready;
+  if (!currentHost(generation)) throw new Error("MCP session disconnected");
   switch (method) {
     case "tabs.list": {
       const tabs = await browser.tabs.query({});
       return { tabs: tabs.map((tab) => ({ id: tab.id, windowId: tab.windowId, title: tab.title, url: tab.url, active: tab.active, pinned: tab.pinned })) };
     }
-    case "grants.request": return requestGrant(clientId, params);
+    case "grants.request": return requestGrant(clientId, params, generation);
     case "grants.list": return { grants: state.grants.filter((grant) => grant.clientId === clientId), pending: state.pending.filter((pending) => pending.clientId === clientId) };
     case "grants.revoke": {
       const before = state.grants.length;
@@ -352,6 +392,35 @@ async function executeBridge(method, params, clientId) {
       const auth = await authorization(clientId, Number(params.tabId), "INTERACT");
       const result = await browser.tabs.sendMessage(Number(params.tabId), { type: "page.interact", action: params.action, expectedDocumentToken: auth.documentToken, expectedUrl: auth.url });
       await audit("page.interact", { clientId, tabId: params.tabId, action: params.action && params.action.kind, auth });
+      return result;
+    }
+    case "page.actions": {
+      const tabId = Number(params.tabId);
+      if (!Array.isArray(params.actions) || !params.actions.length || params.actions.length > 20 ||
+          params.actions.some((action) => !action || !["click", "type", "scroll"].includes(action.kind))) {
+        throw new Error("Provide 1 to 20 click/type/scroll actions");
+      }
+      // Check both capabilities before consuming a one-operation grant.
+      const read = await authorization(clientId, tabId, "READ", false);
+      const auth = await authorization(clientId, tabId, "INTERACT", false);
+      if (read.documentToken !== auth.documentToken || read.url !== auth.url) {
+        throw new Error("Document changed while authorizing actions");
+      }
+      // Another request can consume or revoke READ while INTERACT is being checked.
+      for (const [access, capability] of [[read, "READ"], [auth, "INTERACT"]]) {
+        const current = access.source === "rule"
+          ? matchingRule(access.url, capability)
+          : state.grants.find((grant) => grant.id === access.grantId);
+        if (!current) throw new Error("Access was revoked while authorizing actions");
+      }
+      state.grants = state.grants.filter((grant) =>
+        grant.lifetime !== "once" || (grant.id !== read.grantId && grant.id !== auth.grantId)
+      );
+      const result = await browser.tabs.sendMessage(tabId, {
+        type: "page.actions", actions: params.actions,
+        expectedDocumentToken: auth.documentToken, expectedUrl: auth.url,
+      });
+      await audit("page.actions", { clientId, tabId, count: params.actions.length, auth });
       return result;
     }
     case "page.navigate": {
@@ -419,18 +488,20 @@ async function executeBridge(method, params, clientId) {
         results: results.map((result) => ({ documentId: result.documentId, frameId: result.frameId, result: result.result })),
       };
     }
-    case "audit.list": return { events: state.audit.slice(-Math.max(1, Math.min(Number(params.limit) || 100, 500))).reverse() };
+    case "audit.list": return { events: state.audit.filter((event) => event.clientId === clientId).slice(-Math.max(1, Math.min(Number(params.limit) || 100, 500))).reverse() };
     default: throw new Error(`Unknown bridge method: ${method}`);
   }
 }
 
 async function handleBridgeRequest(message) {
+  const port = state.port;
+  const generation = hostGeneration;
   try {
-    const result = await executeBridge(message.method, message.params || {}, String(message.clientId || "local-mcp-client"));
-    state.port.postMessage({ type: "bridge.response", id: message.id, ok: true, result });
+    const result = await executeBridge(message.method, message.params || {}, String(message.clientId || "local-mcp-client"), generation);
+    if (currentHost(generation)) port.postMessage({ type: "bridge.response", id: message.id, ok: true, result });
   } catch (error) {
     await audit("operation.denied", { clientId: message.clientId, method: message.method, error: error.message });
-    if (state.port) state.port.postMessage({ type: "bridge.response", id: message.id, ok: false, error: { message: error.message } });
+    if (currentHost(generation)) port.postMessage({ type: "bridge.response", id: message.id, ok: false, error: { message: error.message } });
   }
 }
 
@@ -438,8 +509,17 @@ browser.runtime.onMessage.addListener(async (message) => {
   await ready;
   switch (message && message.type) {
     case "ui.state": return publicState();
-    case "host.start": startHost(); return publicState();
-    case "host.stop": stopHost(); return publicState();
+    case "host.start":
+      await browser.storage.local.set({ enabled: true });
+      state.enabled = true;
+      startHost();
+      return publicState();
+    case "host.stop":
+      await browser.storage.local.set({ enabled: false });
+      state.enabled = false;
+      await browser.alarms.clear("reconnect");
+      stopHost();
+      return publicState();
     case "pending.approve": return approvePending(message.requestId, message.lifetime);
     case "pending.deny": return denyPending(message.requestId);
     case "grant.revoke": {
@@ -511,4 +591,11 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
   updateBadge();
 });
 
-ready.then(updateBadge);
+browser.alarms.onAlarm.addListener(async (alarm) => {
+  await ready;
+  if (alarm.name === "reconnect" && state.enabled) startHost();
+});
+ready.then(() => {
+  if (state.enabled) startHost();
+  return updateBadge();
+});

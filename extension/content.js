@@ -2,6 +2,19 @@
   "use strict";
 
   const documentToken = crypto.randomUUID();
+  const references = new Map();
+  const elementReferences = new WeakMap();
+  let nextReference = 0;
+
+  function reference(element) {
+    let ref = elementReferences.get(element);
+    if (!ref) {
+      ref = `@${documentToken}:${++nextReference}`;
+      elementReferences.set(element, ref);
+    }
+    references.set(ref, element);
+    return ref;
+  }
   const SAFE_ATTRIBUTES = ["aria-label", "aria-describedby", "href", "name", "placeholder", "role", "title", "type"];
   const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
   const MAX_SNAPSHOT_FIELDS = 200;
@@ -16,6 +29,7 @@
       if (element.hasAttribute(name)) attributes[name] = clipped(element.getAttribute(name), 1000);
     }
     return {
+      ref: reference(element),
       tag: element.tagName.toLowerCase(),
       text: clipped(element.innerText || element.textContent),
       attributes,
@@ -33,7 +47,7 @@
   }
 
   function snapshot(params) {
-    const maxChars = Math.max(1000, Math.min(Number(params.maxChars) || 50000, 200000));
+    const maxChars = Math.max(1000, Math.min(Number(params.maxChars) || 12000, 200000));
     const headings = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6"))
       .slice(0, 200)
       .map((element) => ({ level: Number(element.tagName.slice(1)), text: clipped(element.innerText) }));
@@ -47,7 +61,14 @@
         fields,
       };
     });
+    // Drop detached nodes while keeping references stable for the current document.
+    for (const [ref, element] of references) {
+      if (element.isConnected === false) references.delete(ref);
+    }
     const result = {
+      elements: Array.from(document.querySelectorAll(
+        "a[href],button,input,textarea,select,[role=button],[role=link],[contenteditable=true]"
+      )).filter((element) => element.getClientRects().length).slice(0, 200).map(elementData),
       documentToken,
       url: clipped(location.href),
       title: clipped(document.title),
@@ -59,6 +80,7 @@
     };
     if (params.includeLinks !== false) {
       result.links = Array.from(document.links).slice(0, 500).map((link) => ({
+        ref: reference(link),
         text: clipped(link.innerText),
         href: clipped(link.href),
       }));
@@ -70,7 +92,9 @@
   }
 
   function target(selector) {
-    const element = document.querySelector(selector);
+    const element = typeof selector === "string" && selector.startsWith("@")
+      ? references.get(selector) : document.querySelector(selector);
+    if (element && element.isConnected === false) throw new Error("Element reference is stale; take a new snapshot");
     if (!element) throw new Error(`No element matches selector: ${selector}`);
     return element;
   }
@@ -93,7 +117,10 @@
       if (!editable && !element.isContentEditable) throw new Error("Target is not editable");
       element.focus();
       if (editable) {
-        element.value = action.clear === false ? element.value + String(action.text || "") : String(action.text || "");
+        const value = action.clear === false ? element.value + String(action.text || "") : String(action.text || "");
+        // Use the native setter so controlled framework inputs see the change event.
+        const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        Object.getOwnPropertyDescriptor(prototype, "value").set.call(element, value);
       } else {
         element.textContent = action.clear === false ? element.textContent + String(action.text || "") : String(action.text || "");
       }
@@ -124,6 +151,27 @@
       case "document.info": return Promise.resolve({ documentToken, url: location.href, title: document.title });
       case "page.snapshot": return Promise.resolve(snapshot(message.params || {}));
       case "page.query": return Promise.resolve({ documentToken, elements: query(message.selector, message.limit) });
+      case "page.actions": {
+        const results = [];
+        let error;
+        for (const action of message.actions) {
+          try {
+            if (!sameAuthorizationUrl(message.expectedUrl)) throw new Error("Page navigated during actions");
+            results.push(interact(action));
+          } catch (failure) {
+            error = failure.message;
+            break;
+          }
+        }
+        let page;
+        if (sameAuthorizationUrl(message.expectedUrl)) {
+          try { page = snapshot({ maxChars: 12000 }); }
+          catch (failure) { error = error || failure.message; }
+        } else {
+          error = error || "Page navigated during actions; take a new snapshot";
+        }
+        return Promise.resolve({ documentToken, results, completed: results.length, error, snapshot: page });
+      }
       case "page.interact": return Promise.resolve({ documentToken, ...interact(message.action) });
       default: return undefined;
     }

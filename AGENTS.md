@@ -8,8 +8,7 @@ User guide: [docs/user-setup.md](docs/user-setup.md).
 - Need explicit user profile choice. Never guess profile.
 - Ask before system-software install, GUI launch, shell-startup edit, or client-config edit outside repo.
 - Firefox confirmation stays. Never sideload into profile or auto-grant capability.
-- Token stays private. Never run `ff-mcp connection --show-token` in captured tool output.
-- Never commit token, print token, paste token, or bind MCP outside loopback.
+- Never bind MCP outside loopback. Tab grants belong to MCP sessions; persistent rules apply to all sessions.
 - Do not run `ff-mcp serve`. Firefox starts native host.
 
 ## Setup
@@ -26,9 +25,9 @@ User guide: [docs/user-setup.md](docs/user-setup.md).
    ff-mcp setup --profile "/exact/profile/path" --install-addon --json
    ```
 
-8. User confirms Firefox install. User opens popup and presses **Start**.
+8. User confirms Firefox install. Extension listens automatically while enabled.
 9. Snap/Flatpak may show portal prompt. User approves.
-10. User privately runs `ff-mcp connection --show-token` and sets `FF_MCP_TOKEN`.
+10. Run `ff-mcp connection` for the local URL; no token is needed.
 11. Configure chosen client from runbook. Ask before external config write.
 12. Verify tool list, `browser_tabs`, approved `READ`, then `browser_revoke`.
 
@@ -44,8 +43,8 @@ UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv sync --locked --group dev
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run ruff format --check .
 UV_CACHE_DIR=/tmp/ff-mcp-uv-cache uv run pytest -q
-node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js
+node --test tests/background.test.js tests/content.test.js tests/policy.test.js tests/rule-model.test.js tests/popup.test.js
 ```
 
-Preserve Firefox capability boundary. Setup convenience must not weaken consent, token secrecy, or
+Preserve Firefox capability boundary. Setup convenience must not weaken consent, session isolation, or
 loopback binding.

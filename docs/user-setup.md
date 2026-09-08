@@ -9,7 +9,7 @@ You need:
 - Firefox 150 or newer.
 - Python 3.14.
 - [`uv`](https://docs.astral.sh/uv/).
-- A local MCP client that supports Streamable HTTP and custom headers.
+- A local MCP client that supports stateful Streamable HTTP.
 
 You must choose the Firefox profile that will contain the extension. Firefox will ask you to
 confirm the extension installation. ff-mcp will ask you to approve access to websites.
@@ -20,7 +20,7 @@ You can give this repository to Codex, Claude Code, Gemini CLI, Copilot, or anot
 agent. Ask the agent to set up ff-mcp. The agent instructions are in [AGENTS.md](../AGENTS.md).
 
 The agent will ask you to select a Firefox profile. It will also ask before it opens Firefox or
-changes your MCP client configuration. Do not send your ff-mcp token to the agent.
+changes your MCP client configuration.
 
 ## Install without an agent
 
@@ -66,7 +66,7 @@ ff-mcp setup \
 This command performs these actions:
 
 1. It registers the Firefox Native Messaging host for your user account.
-2. It creates a private local configuration and bearer token.
+2. It creates a private local configuration.
 3. It downloads the Mozilla-signed XPI for this version.
 4. It verifies the XPI with the published SHA-256 value.
 5. It opens the XPI in the profile that you selected.
@@ -90,7 +90,9 @@ Mozilla also documents this process in
 
 ### 4. Start ff-mcp
 
-Open the ff-mcp toolbar popup. Select **Start**.
+The enabled extension starts ff-mcp automatically, including after Firefox restarts.
+Use **Stop** in the toolbar popup to disable listening and clear temporary grants.
+Use **Start** to enable it again.
 
 Firefox starts the native companion. The companion listens only on `127.0.0.1`. The MCP endpoint
 stops when the extension closes its connection.
@@ -100,40 +102,29 @@ prompt if you want ff-mcp to connect.
 
 ## Connect your MCP client
 
-Get the connection information in a private terminal:
-
-```sh
-ff-mcp connection --show-token
-```
-
-Treat the bearer token as a password. Do not paste it into chat, an issue, or a file in this
-repository. Store it in an environment variable or your client's secret store.
+Run `ff-mcp connection` to get the local URL. No token is needed.
+If you have an older client entry, remove its bearer-token header or environment setting.
 
 ### Codex CLI
 
-Set the token in the environment that starts Codex:
+Run:
 
 ```sh
-export FF_MCP_TOKEN="your private token"
 codex mcp add ff-mcp \
-  --url http://127.0.0.1:8765/mcp \
-  --bearer-token-env-var FF_MCP_TOKEN
+  --url http://127.0.0.1:8765/mcp
 codex mcp get ff-mcp --json
 ```
 
-The environment variable must be present when you start Codex in the future.
 See the [Codex MCP guide](https://learn.chatgpt.com/docs/extend/mcp) for more configuration options.
 
 ### Claude Code
 
-Set the token in the environment that starts Claude Code:
+Run:
 
 ```sh
-export FF_MCP_TOKEN="your private token"
 claude mcp add \
   --transport http \
   --scope local \
-  --header 'Authorization: Bearer ${FF_MCP_TOKEN}' \
   ff-mcp http://127.0.0.1:8765/mcp
 claude mcp get ff-mcp
 ```
@@ -147,20 +138,17 @@ Add a Streamable HTTP server to your client. Use this connection shape:
 ```json
 {
   "type": "http",
-  "url": "http://127.0.0.1:8765/mcp",
-  "headers": {
-    "Authorization": "Bearer YOUR_LOCAL_TOKEN"
-  }
+  "url": "http://127.0.0.1:8765/mcp"
 }
 ```
 
-Use your client's environment-variable support or secret store when possible.
+No shared token or connection approval is needed. Your client must retain its MCP session header.
 
 ## Test the connection
 
 1. Confirm that your client lists the ff-mcp browser tools.
 2. Call `browser_tabs`.
-3. Request `READ` access to a harmless page with `browser_request_access`.
+3. Request `READ` access with `browser_request_access`, including agent, model, harness, and task reason.
 4. Approve the request in Firefox.
 5. Read the page.
 6. Revoke the grant with `browser_revoke`.

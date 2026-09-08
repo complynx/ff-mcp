@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 DEFAULT_PORT = 8765
-MIN_TOKEN_LENGTH = 32
 MAX_PORT = 65_535
 CONFIG_MODE = 0o600
 
@@ -19,9 +17,7 @@ CONFIG_MODE = 0o600
 class HostConfig:
     """Validated native companion configuration."""
 
-    token: str
     port: int = DEFAULT_PORT
-    allowed_origins: tuple[str, ...] = ()
 
 
 def default_config_path() -> Path:
@@ -64,9 +60,7 @@ def load_or_create_config(path: Path | None = None) -> HostConfig:
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
         new_data: dict[str, Any] = {
-            "token": secrets.token_urlsafe(MIN_TOKEN_LENGTH),
             "port": DEFAULT_PORT,
-            "allowed_origins": [],
         }
         try:
             _create_config(config_path, new_data)
@@ -82,16 +76,9 @@ def load_or_create_config(path: Path | None = None) -> HostConfig:
     if os.name != "nt":
         config_path.chmod(CONFIG_MODE)
 
-    token = data.get("token")
     port = data.get("port", DEFAULT_PORT)
-    origins = data.get("allowed_origins", [])
-    if not isinstance(token, str) or len(token) < MIN_TOKEN_LENGTH:
-        error = f"config token must be a string of at least {MIN_TOKEN_LENGTH} characters"
-        raise ValueError(error)
-    if not isinstance(port, int) or not 1 <= port <= MAX_PORT:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= MAX_PORT:
         error = f"config port must be between 1 and {MAX_PORT}"
         raise ValueError(error)
-    if not isinstance(origins, list) or not all(isinstance(value, str) for value in origins):
-        error = "allowed_origins must be a list of strings"
-        raise ValueError(error)
-    return HostConfig(token=token, port=port, allowed_origins=tuple(origins))
+    # Ignore legacy token/origin fields. Existing config files remain compatible.
+    return HostConfig(port=port)

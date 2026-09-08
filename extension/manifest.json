@@ -25,6 +25,7 @@
   },
   "permissions": [
     "nativeMessaging",
+    "alarms",
     "storage",
     "tabs",
     "webNavigation"

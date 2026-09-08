@@ -78,6 +78,7 @@ jobs:
           node tests/rule-model.test.js
           node tests/background.test.js
           node tests/content.test.js
+          node tests/popup.test.js
 
       - name: Check JavaScript syntax
         run: |
