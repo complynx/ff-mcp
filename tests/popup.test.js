@@ -73,6 +73,15 @@ test("pending lifetime choices survive unrelated changes and expire with their r
   context.update(state);
   assert.equal(elements.get("#toggle").textContent, "Stop");
   assert.match(elements.get("#status").textContent, /retrying/);
+  state = { ...state, lastHostError: "No such native application io.github.ff_mcp" };
+  context.update(state);
+  assert.match(elements.get("#host-error").textContent, /No such native application/);
+  state = { ...state, lastHostError: "Native host exited" };
+  context.update(state);
+  assert.match(elements.get("#host-error").textContent, /Native host exited/);
+  state = { ...state, lastHostError: null };
+  context.update(state);
+  assert.equal(elements.get("#host-error").textContent, "");
   await elements.get("#toggle").listeners.get("click")();
   assert.equal(sent.at(-1).type, "host.stop");
 

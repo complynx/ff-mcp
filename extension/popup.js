@@ -2,6 +2,7 @@
 
 const elements = {
   status: document.querySelector("#status"),
+  hostError: document.querySelector("#host-error"),
   toggle: document.querySelector("#toggle"),
   connection: document.querySelector("#connection"),
   url: document.querySelector("#server-url"),
@@ -75,11 +76,14 @@ function update(state) {
     if (!pendingIds.has(requestId)) selectedLifetimes.delete(requestId);
   }
   // Keep the user's lifetime selection while polling for new requests.
-  if (previous && ["enabled", "running", "starting", "host", "pending", "grants"].every(
+  if (previous && ["enabled", "running", "starting", "host", "lastHostError", "pending", "grants"].every(
     (key) => JSON.stringify(previous[key]) === JSON.stringify(state[key])
   )) return;
   elements.status.textContent = state.running ? "Server running on localhost" : state.starting ? "Server starting…" : state.enabled ? "Server disconnected; retrying…" : "Server stopped";
   elements.toggle.textContent = state.enabled ? "Stop" : "Start";
+  elements.hostError.textContent = state.lastHostError
+    ? `${state.lastHostError} Run ff-mcp diagnostics to locate the native host log.` : "";
+  elements.hostError.classList.toggle("hidden", !state.lastHostError);
   elements.connection.classList.toggle("hidden", !state.running);
   elements.url.value = state.host ? state.host.url : "";
 
