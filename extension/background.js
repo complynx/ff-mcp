@@ -7,6 +7,7 @@ const state = {
   enabled: true,
   port: null,
   host: null,
+  lastHostError: null,
   grants: [],
   pending: [],
   rules: [],
@@ -47,6 +48,7 @@ function publicState() {
     running: Boolean(state.port && state.host),
     starting: Boolean(state.port && !state.host),
     host: state.host,
+    lastHostError: state.lastHostError,
     grants: state.grants,
     pending: state.pending,
     rules: state.rules,
@@ -90,13 +92,23 @@ async function openPendingPopup(tabId, generation) {
 
 function startHost() {
   if (state.port) return;
-  const port = browser.runtime.connectNative(HOST_NAME);
+  let port;
+  try {
+    port = browser.runtime.connectNative(HOST_NAME);
+  } catch (error) {
+    state.lastHostError = error.message || "Firefox could not start the native host.";
+    audit("host.start_failed", { error: state.lastHostError });
+    if (state.enabled) browser.alarms.create("reconnect", { delayInMinutes: 0.1 });
+    updateBadge();
+    return;
+  }
   const generation = ++hostGeneration;
   state.port = port;
   state.host = null;
   port.onMessage.addListener((message) => {
     if (!currentHost(generation)) return;
     if (message.type === "host.ready") {
+      state.lastHostError = null;
       state.host = {
         url: message.url,
         serverInstanceId: message.serverInstanceId,
@@ -108,8 +120,13 @@ function startHost() {
     }
   });
   port.onDisconnect.addListener(() => {
-    const error = browser.runtime.lastError;
+    const error = port.error || browser.runtime.lastError;
     if (error) console.warn("ff-mcp native host disconnected:", error.message);
+    if (state.port !== port || generation !== hostGeneration) return;
+    const reason = error?.message || (state.host
+      ? "Native host disconnected without an error from Firefox."
+      : "Native host disconnected before startup completed; Firefox supplied no error.");
+    state.lastHostError = reason;
     if (state.port === port) {
       hostGeneration += 1;
       state.port = null;
@@ -119,7 +136,7 @@ function startHost() {
       if (state.enabled) browser.alarms.create("reconnect", { delayInMinutes: 0.1 });
       updateBadge();
     }
-    audit("host.stopped", error ? { error: error.message } : {});
+    audit("host.stopped", { error: reason });
   });
   port.postMessage({ type: "extension.ready", version: browser.runtime.getManifest().version });
   updateBadge();
@@ -127,6 +144,8 @@ function startHost() {
 
 function stopHost() {
   hostGeneration += 1;
+  state.lastHostError = null;
+  audit("host.stopped_by_user");
   state.grants = [];
   state.pending = [];
   if (!state.port) return;

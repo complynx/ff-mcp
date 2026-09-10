@@ -18,10 +18,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)  # ruff: ignore[pytest-fixture-autouse] - isolate all CLI calls
+def isolate_host_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep command dispatch tests out of the user's diagnostic log."""
+    monkeypatch.setattr("ff_mcp.diagnostics.log_path", lambda: tmp_path / "host.log")
+
+
 @patch("ff_mcp.__main__.asyncio.run")
 def test_firefox_manifest_arguments_start_server(run: MagicMock) -> None:
     """Treat Firefox's manifest arguments as a request to serve."""
     with (
+        patch("ff_mcp.__main__._configure_native_stdio"),
         patch("ff_mcp.__main__.serve_native", new=lambda: "server"),
         patch.object(
             sys,
@@ -84,6 +91,21 @@ def test_connection_returns_url_without_authentication(capsys: pytest.CaptureFix
         native_main.main()
     output = capsys.readouterr().out
     assert json.loads(output) == {"url": "http://127.0.0.1:8765/mcp"}
+
+
+def test_diagnostics_does_not_load_config_or_start_host(capsys: pytest.CaptureFixture[str]) -> None:
+    """Print diagnostic locations without reading secrets or starting a server."""
+    with (
+        patch.object(sys, "argv", ["ff-mcp", "diagnostics"]),
+        patch("ff_mcp.__main__.load_or_create_config") as config,
+        patch("ff_mcp.__main__.serve_native") as serve,
+    ):
+        native_main.main()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["log_path"].endswith("host.log")
+    assert payload["log_exists"] is False
+    config.assert_not_called()
+    serve.assert_not_called()
 
 
 def test_legacy_show_token_flag_returns_only_url(capsys: pytest.CaptureFixture[str]) -> None:

@@ -19,6 +19,8 @@ import uvicorn
 from .app import LocalOriginMiddleware, create_mcp
 from .bridge import BridgeError, NativeBridge, NativeWriter, read_native_message
 from .config import default_config_path, load_or_create_config
+from .diagnostics import LOG as DIAGNOSTIC_LOG
+from .diagnostics import diagnostic_paths, host_diagnostics
 from .installer import HOST_NAME, install_native_manifest
 from .onboarding import (
     FirefoxProfile,
@@ -224,6 +226,7 @@ async def serve_native() -> None:
     """Serve MCP over localhost while bridging requests through Firefox."""
     config = load_or_create_config()
     loop = asyncio.get_running_loop()
+    DIAGNOSTIC_LOG.info("Configuration loaded; target=127.0.0.1:%s", config.port)
     writer = NativeWriter(sys.stdout.buffer)
     bridge = NativeBridge(writer.send)
     stopping = asyncio.Event()
@@ -261,6 +264,7 @@ async def serve_native() -> None:
             "serverInstanceId": str(uuid4()),
         }
     )
+    DIAGNOSTIC_LOG.info("Host ready")
     stopping_task = asyncio.create_task(stopping.wait())
     try:
         done, _ = await asyncio.wait(
@@ -288,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(description="Firefox MCP native companion")
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("diagnostics", help="Print diagnostic paths without starting the host")
     install = subparsers.add_parser("install-native", help="Register the host with Firefox")
     install.add_argument("--executable", help="Absolute path to ff-mcp-native")
     profiles = subparsers.add_parser("profiles", help="List local Firefox profiles")
@@ -324,6 +329,9 @@ def main() -> None:
     arguments = _native_arguments(sys.argv[1:])
     parser = build_parser()
     args = parser.parse_args(arguments)
+    if args.command == "diagnostics":
+        sys.stdout.write(json.dumps(diagnostic_paths(), indent=2) + "\n")
+        return
     if args.command == "install-native":
         path = install_native_manifest(args.executable)
         sys.stdout.write(f"Installed Firefox Native Messaging manifest: {path}\n")
@@ -347,10 +355,11 @@ def main() -> None:
         except (OSError, RuntimeError, ValueError) as error:
             parser.error(str(error))
         return
-    _configure_native_stdio()
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-    with suppress(KeyboardInterrupt):
-        asyncio.run(serve_native())
+    with host_diagnostics():
+        _configure_native_stdio()
+        logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+        with suppress(KeyboardInterrupt):
+            asyncio.run(serve_native())
 
 
 if __name__ == "__main__":

@@ -233,7 +233,7 @@ function renderRules() {
 function renderAudit(events) {
   audit.replaceChildren();
   for (const event of events) {
-    audit.append(node("p", `${event.at}  ${event.event}  ${event.method || ""} ${event.tabId || ""}`, "audit-row"));
+    audit.append(node("p", `${event.at}  ${event.event}  ${event.method || ""} ${event.tabId || ""} ${event.error || ""}`, "audit-row"));
   }
   if (!events.length) audit.textContent = "No audit events.";
 }

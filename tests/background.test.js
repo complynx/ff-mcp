@@ -591,7 +591,23 @@ async function bridgeRequest(id, method, params, clientId = "test-client") {
     assert.strictEqual(afterRollback.grants.length, 0);
   }
 
+  port.error = { message: "No such native application io.github.ff_mcp" };
+  nativeDisconnectListener();
+  let diagnosticState = await runtimeListener({ type: "ui.state" });
+  assert.strictEqual(diagnosticState.lastHostError, port.error.message);
+  assert.strictEqual(diagnosticState.audit[0].error, port.error.message);
+  port.error = null;
+  await alarmListener({ name: "reconnect" });
+  nativeDisconnectListener();
+  diagnosticState = await runtimeListener({ type: "ui.state" });
+  assert.match(diagnosticState.lastHostError, /before startup completed/);
+  await alarmListener({ name: "reconnect" });
+  nativeMessageListener({ type: "host.ready", url: "http://127.0.0.1:8765/mcp" });
+  assert.strictEqual((await runtimeListener({ type: "ui.state" })).lastHostError, null);
+
   const stopped = await runtimeListener({ type: "host.stop" });
+  nativeDisconnectListener();
+  assert.strictEqual((await runtimeListener({ type: "ui.state" })).lastHostError, null);
   assert.strictEqual(stopped.running, false);
   assert.strictEqual(stopped.grants.length, 0);
   assert.strictEqual(stopped.pending.length, 0);
@@ -599,6 +615,14 @@ async function bridgeRequest(id, method, params, clientId = "test-client") {
   await alarmListener({ name: "reconnect" });
   assert.strictEqual((await runtimeListener({ type: "ui.state" })).starting, false);
   assert(nativeDisconnectListener, "Native disconnect listener was not registered");
+  const connectNative = browser.runtime.connectNative;
+  browser.runtime.connectNative = () => { throw new Error("Native messaging unavailable"); };
+  const failedStart = await runtimeListener({ type: "host.start" });
+  assert.strictEqual(failedStart.lastHostError, "Native messaging unavailable");
+  assert.strictEqual(failedStart.starting, false);
+  browser.runtime.connectNative = connectNative;
+  await alarmListener({ name: "reconnect" });
+  assert.strictEqual((await runtimeListener({ type: "ui.state" })).starting, true);
 
   console.error = originalConsoleError;
   console.warn = originalConsoleWarn;

@@ -2,6 +2,22 @@
 
 This guide explains how to install ff-mcp on the same computer as Firefox.
 
+## Connection diagnostics
+
+If the popup says `Server disconnected; retrying…`, it also shows the last Firefox
+native-messaging error. **Rules and audit log** keeps the error with its timestamp.
+If Firefox supplies no error, the popup distinguishes a startup failure from a later disconnect.
+
+Run `ff-mcp diagnostics` to print the installed version, Python path, configuration path,
+and native host log path. This command does not start a server or read configuration contents.
+The host writes `native-host.log` beside its configuration, with two rotated backups
+of at most 256 KiB each. It records startup, readiness, shutdown, and failure types with
+stack locations. It excludes exception messages, local variables, and browser request data.
+
+No log can be written if Firefox cannot locate or execute the host, Python cannot import
+its dependencies, or the log directory is not writable. In these cases, use the popup error
+and Firefox's Browser Console to check the native host registration and executable.
+
 ## Before you start
 
 You need:
