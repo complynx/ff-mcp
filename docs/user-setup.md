@@ -44,6 +44,9 @@ Run these commands from the repository root.
 
 ### 1. Install the native companion
 
+On Windows, use [Windows installation and repair](#windows-installation-and-repair) below.
+On other platforms:
+
 ```sh
 uv tool install --force .
 ```
@@ -171,19 +174,77 @@ No shared token or connection approval is needed. Your client must retain its MC
 
 ## Repair or remove ff-mcp
 
+On Windows, use the following procedure for both installation and repair.
+
+### Windows installation and repair
+
+Open an ordinary PowerShell from the Windows Start menu, outside Codex. Run these commands
+from the repository root, with Python 3.14 and `uv` already installed:
+
+```powershell
+$env:UV_TOOL_DIR = "$env:USERPROFILE\.local\share\uv\tools"
+$env:UV_TOOL_BIN_DIR = "$env:USERPROFILE\.local\bin"
+uv tool install --force --python 3.14 .
+if ($LASTEXITCODE -ne 0) { throw "ff-mcp installation failed" }
+& "$env:UV_TOOL_BIN_DIR\ff-mcp.exe" install-native --executable "$env:UV_TOOL_BIN_DIR\ff-mcp-native.exe"
+if ($LASTEXITCODE -ne 0) { throw "Native host registration failed" }
+& "$env:UV_TOOL_BIN_DIR\ff-mcp.exe" diagnostics
+```
+
+If `uv` is not on PATH but is installed at `$env:USERPROFILE\.local\bin\uv.exe`, use that
+full path with PowerShell's `&` operator. Use the same two `UV_TOOL_*` variables for future
+tool updates or removal. They apply only to this PowerShell session; these commands do not edit
+your shell startup files. Use the full `ff-mcp.exe` path for subsequent setup commands too.
+
+Packaged Windows apps, including Codex, can redirect AppData writes into their private LocalCache.
+An installation can appear correct inside Codex while Firefox cannot find the manifest or Python
+runtime. The explicit tool directory avoids a launcher that points at an absent AppData runtime.
+Registration must also run outside Codex so Firefox sees the same files and registry values.
+Starting PowerShell through `cmd /c` inside Codex is not sufficient: that wrapper retained redirected
+AppData in the verified Windows setup.
+
+For a new installation, continue with [profile selection](#2-select-a-firefox-profile) and confirm
+the add-on installation in Firefox. For an existing, current add-on, use **Stop → Start** in its
+popup after repair. No profile change or add-on reinstall is needed.
+
+If Firefox still reports `No such native application io.github.ff_mcp`, inspect the registration
+in the same ordinary PowerShell:
+
+```powershell
+$hostKey = Get-Item 'HKCU:\Software\Mozilla\NativeMessagingHosts\io.github.ff_mcp'
+$manifestPath = $hostKey.GetValue('')
+Test-Path -LiteralPath $manifestPath
+$nativeManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+Test-Path -LiteralPath $nativeManifest.path
+```
+
+Both path checks must return `True`. This reads the native manifest, not `config.json`.
+If the CLI reports `uv trampoline failed to canonicalize script path`, repeat the tool installation
+above before attempting registration. A missing log is expected if Firefox cannot start Python.
+
+An open port alone is not full verification: confirm MCP initialization, the tool list, and a
+successful `browser_tabs` response. Reading a page is a separate capability check.
+
+### Other platforms
+
 Run this command again to repair the Python companion:
 
 ```sh
 uv tool install --force .
 ```
 
-Run `ff-mcp setup --profile "/path/to/profile"` again to repair the Native Messaging manifest.
-This command does not change your Firefox capability rules.
+Run `ff-mcp install-native --executable "/absolute/path/to/ff-mcp-native"` to repair only the
+Native Messaging registration. This does not change profiles or Firefox capability rules.
+
+### Removal
 
 To remove ff-mcp:
 
 1. Open `about:addons` in each Firefox profile that contains ff-mcp.
 2. Remove the add-on.
 3. Remove the ff-mcp entry from your MCP client.
-4. Run `ff-mcp setup --json` to see the native manifest and configuration paths.
+4. Run `ff-mcp diagnostics` to locate the configuration and logs without changing the installation.
+   On Windows, read the native manifest path from the registry as shown above. On Linux it is
+   `~/.mozilla/native-messaging-hosts/io.github.ff_mcp.json`; on macOS it is
+   `~/Library/Application Support/Mozilla/NativeMessagingHosts/io.github.ff_mcp.json`.
 5. Check each path before you delete its file.

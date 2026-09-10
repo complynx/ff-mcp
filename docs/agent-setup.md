@@ -25,6 +25,15 @@ Ask before installing system software.
 
 ## 2. Install host
 
+On Windows, follow [Windows installation and repair](user-setup.md#windows-installation-and-repair).
+Set explicit tool and executable directories outside AppData. Ask the user to run registration in
+ordinary PowerShell outside Codex if the agent runs in a packaged Windows app. Passing a Windows
+executable through WSL did not escape redirection in the observed Codex installation.
+Neither did wrapping PowerShell in `cmd /c`: it still found a runtime that existed only in LocalCache.
+Do not accept paths that exist only in the agent's redirected AppData as proof of a usable install.
+
+On other platforms:
+
 ```sh
 uv tool install --force .
 ff-mcp profiles --json
@@ -32,6 +41,9 @@ ff-mcp profiles --json
 
 `ff-mcp` missing from `PATH`: run `uv tool dir --bin`; use absolute path. Ask before
 `uv tool update-shell` because it edits shell startup files.
+
+On Windows, retain the `UV_TOOL_*` variables for later uv commands and use the full executable path.
+Run `ff-mcp profiles --json` from the same ordinary PowerShell used for installation.
 
 Show profile list. Ask user which exact `path` to use. Never infer from `default`. Duplicate names
 possible. `ff_mcp_installed` informational; Firefox state can be stale.
@@ -73,7 +85,8 @@ Dev-only temporary load: user opens `about:debugging` → **This Firefox** → *
 The enabled extension starts the host automatically. The popup can stop or restart it. Snap/Flatpak may ask for native-messaging portal
 access. User approves.
 
-Host listens on `127.0.0.1` only. Endpoint exists only while popup connection remains active.
+Host listens on `127.0.0.1` only. The endpoint exists while the extension's native connection is
+active; closing the toolbar popup does not stop it.
 
 Run `ff-mcp connection` to get the local URL. No token is needed.
 
@@ -136,8 +149,14 @@ prompt. Reference: [Mozilla portal design](https://firefox-source-docs.mozilla.o
 
 ## Repair/remove
 
-- Repair tool: `uv tool install --force .`.
-- Repair manifest: `ff-mcp setup --profile "/exact/path"`.
+- Windows repair: follow the linked procedure above; reinstall the tool before registration if
+  `uv trampoline failed to canonicalize script path` appears.
+- Other platforms, repair tool: `uv tool install --force .`.
+- Repair only the manifest: `ff-mcp install-native --executable "/absolute/path/to/ff-mcp-native"`.
+  This does not select a profile or reinstall the add-on. Use existing repair authorization.
 - Remove add-on: user uses `about:addons` in each profile.
 - Remove client entry: use client command after inspecting exact entry.
-- Manifest/config paths: `ff-mcp setup --json` prints them. Inspect exact path before delete.
+- Inspect paths without side effects: `ff-mcp diagnostics`; locate the native manifest using the
+  [removal instructions](user-setup.md#removal). Do not run `setup` merely to inspect an installation.
+- After repair, verify loopback listening, MCP initialization, tool listing, and `browser_tabs`.
+  Do not report page access as verified unless the consent/read/revoke sequence also passed.

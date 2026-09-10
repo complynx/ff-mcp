@@ -42,7 +42,11 @@ You can also give this repository to a local coding agent. The agent will read [
 and guide you through setup. You must still select a Firefox profile and approve the add-on in
 Firefox.
 
-The main commands are:
+On Windows, follow [Windows installation and repair](docs/user-setup.md#windows-installation-and-repair).
+It uses explicit uv directories outside AppData and registration from ordinary PowerShell outside
+Codex. This avoids an installation visible to a packaged agent but unavailable to Firefox.
+
+The main commands on other platforms are:
 
 ```sh
 uv tool install --force .

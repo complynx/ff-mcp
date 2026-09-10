@@ -14,7 +14,9 @@ User guide: [docs/user-setup.md](docs/user-setup.md).
 ## Setup
 
 1. Check OS, Firefox 150+, Python 3.14, `uv`.
-2. Run `uv tool install --force .`.
+2. On Windows, follow [Windows installation](docs/user-setup.md#windows-installation-and-repair):
+   use explicit `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` outside AppData. Register the host from an
+   ordinary PowerShell opened outside Codex. Other platforms: `uv tool install --force .`.
 3. If command missing: run `uv tool dir --bin`; use absolute binary. Ask before `uv tool update-shell`.
 4. Run `ff-mcp profiles --json`.
 5. Show profiles. Ask user for exact path.
@@ -48,3 +50,20 @@ node --test tests/background.test.js tests/content.test.js tests/policy.test.js 
 
 Preserve Firefox capability boundary. Setup convenience must not weaken consent, session isolation, or
 loopback binding.
+
+## Windows repair
+
+- Packaged Codex processes can see redirected AppData files that Firefox cannot see. A successful
+  install, registry query, or `Test-Path` inside Codex does not prove Firefox can load the host.
+- WSL can inspect the real files under `/mnt/c`; Windows executables launched through WSL may still
+  inherit the packaged environment. Do not treat that launch as an escape from redirection.
+  A `cmd /c powershell` wrapper also retained redirected AppData in the verified setup.
+- `No such native application io.github.ff_mcp`: verify the registry's manifest path, the actual
+  manifest file, and its executable path from ordinary PowerShell outside Codex.
+- `uv trampoline failed to canonicalize script path`: repair the tool installation first. Its
+  launcher can point at a missing runtime in ordinary AppData while the files exist only in LocalCache.
+- Repairing only the native registration uses `install-native --executable` with an explicit path;
+  it does not select or modify a Firefox profile. Do not reinstall a current add-on for this repair.
+- Honor existing repair authorization; ask for missing permission only. Do not launch the server
+  manually. Verify the loopback listener, MCP initialization, tool listing, and `browser_tabs`.
+  Report page-access validation separately; it still requires the applicable Firefox grant.
