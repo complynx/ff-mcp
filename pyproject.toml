@@ -11,7 +11,7 @@ requires-python = ">=3.14,<3.15"
 license = { file = "LICENSE" }
 authors = [{ name = "ff-mcp contributors" }]
 dependencies = [
-  "mcp>=1.29,<2",
+  "mcp>=1.29,<3",
   "uvicorn>=0.35,<1",
 ]
 classifiers = [
